@@ -127,6 +127,19 @@ Order of operations after the script finishes
 The printed summary walks you through it step by step, but the critical sequencing rule is: DNS A record must be live and verified before running setup_ssl.sh
 — Let's Encrypt will fail the HTTP-01 challenge if the domain doesn't resolve to the instance yet.
 
+## Tech used
+
+This is an opionated script.  it uses the following settings fro 
+
+```
+INSTANCE_BLUEPRINT="lamp_8_bitnami"
+INSTANCE_BUNDLE default is micro_3_0, overridden by setting FLYSPRAY_DB_BUNDLE
+DB_BUNDLE="${FLYSPRAY_DB_BUNDLE:-m icro_2_0}"
+
+DB_BLUEPRINT="postgres_16"
+
+```
+
 
 ## Epilogue: Instance automatic snapshots
 
