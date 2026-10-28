@@ -91,6 +91,84 @@ wait_for_db() {
 }
 
 # ---------------------------------------------------------------------------
+# RESOLVE VARS — call this once at startup, or source in a recovery session
+# ---------------------------------------------------------------------------
+
+# this is a redundant section, added later, that defines all the variables 
+# inside a function.  However the variables are also redefined in various
+# places inside the script
+# TODO - clean up var definition and leave in this one place
+
+resolve_vars() {
+  # Region
+  REGION=$(aws configure get region 2>/dev/null || echo "")
+  REGION=${REGION:-us-east-1}
+  AZ="${REGION}a"
+
+  # Positional args (only meaningful when called from main script flow)
+  CLI_INSTANCE_NAME="${1:-}"
+  CLI_APP_HOSTNAME="${2:-}"
+  CLI_SSL_EMAIL="${3:-}"
+
+  # Instance
+  INSTANCE_NAME="${CLI_INSTANCE_NAME:-${FLYSPRAY_INSTANCE_NAME:-flyspray-app}}"
+  INSTANCE_BLUEPRINT="lamp_8_bitnami"
+  INSTANCE_BUNDLE="${FLYSPRAY_INSTANCE_BUNDLE:-micro_3_0}"
+  STATIC_IP_NAME="${INSTANCE_NAME}-static-ip"
+
+  # Hostname and SSL
+  APP_HOSTNAME="${CLI_APP_HOSTNAME:-${FLYSPRAY_HOSTNAME:-}}"
+  SSL_EMAIL="${CLI_SSL_EMAIL:-${FLYSPRAY_SSL_EMAIL:-}}"
+  require APP_HOSTNAME "App hostname — set FLYSPRAY_HOSTNAME or pass as \$2"
+  require SSL_EMAIL    "SSL email — set FLYSPRAY_SSL_EMAIL or pass as \$3"
+
+  # Database
+  DB_INSTANCE_NAME="${FLYSPRAY_DB_NAME:-flyspray-db}"
+  DB_BUNDLE="${FLYSPRAY_DB_BUNDLE:-micro_2_0}"
+  DB_BLUEPRINT="postgres_16"
+  DB_MASTER_USER="dbmaster"
+  DB_INITIAL_NAME="postgres"
+
+  # Secrets
+  DB_MASTER_PASSWORD="${FLYSPRAY_DB_MASTER_PASSWORD:-}"
+  require DB_MASTER_PASSWORD "DB master password — set FLYSPRAY_DB_MASTER_PASSWORD"
+  APP_PASSWORD="${FLYSPRAY_APP_PASSWORD:-}"
+  require APP_PASSWORD "App DB password — set FLYSPRAY_APP_PASSWORD"
+
+  # App DB
+  APP_DB="${FLYSPRAY_APP_DB:-flyspray}"
+  APP_USER="${FLYSPRAY_APP_USER:-flyspray_user}"
+
+  # S3
+  S3_BUCKET="${FLYSPRAY_S3_BUCKET:-ewx-flyspray-941061635635-us-east-1-an}"
+  S3_DUMP_KEY="${FLYSPRAY_S3_DUMP_KEY:-flyspray_22_10_2026.sql}"
+  LOCAL_DUMP="/tmp/flyspray_dump.sql"
+
+  # Snapshot schedule
+  INSTANCE_SNAPSHOT_TIME="02:00"
+  DB_BACKUP_WINDOW="03:00-03:30"
+
+  # Output paths
+  OUTPUT_CONF="/tmp/flyspray.conf.php"
+  OUTPUT_SSL_SCRIPT="/tmp/setup_ssl.sh"
+
+  # Derived — only available after static IP is attached
+  # INSTANCE_IP is fetched live from AWS rather than stored,
+  # so it's always accurate even in a recovery session
+  INSTANCE_IP=$(aws lightsail get-static-ip \
+    --static-ip-name "$STATIC_IP_NAME" \
+    --region "$REGION" \
+    --query 'staticIp.ipAddress' \
+    --output text 2>/dev/null || echo "")
+
+  log "Variables resolved. Instance IP: ${INSTANCE_IP:-not yet allocated}"
+}
+
+# Call immediately on script start
+resolve_vars "$@"
+
+
+# ---------------------------------------------------------------------------
 # REGION — from AWS CLI config, fallback to us-east-1
 # ---------------------------------------------------------------------------
 REGION=$(aws configure get region 2>/dev/null || echo "")
@@ -115,6 +193,7 @@ CLI_SSL_EMAIL="${3:-}"
 # Priority: CLI arg > env var > default
 # Secrets:  env var only, no default — require() exits if missing
 # ---------------------------------------------------------------------------
+
 
 # --- Instance ---
 INSTANCE_NAME="${CLI_INSTANCE_NAME:-${FLYSPRAY_INSTANCE_NAME:-flyspray-app}}"
