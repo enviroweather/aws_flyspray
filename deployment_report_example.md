@@ -29,10 +29,35 @@ line params. Specifics have been removed from this report.
 
   2. Actually install the latest flyspray on this new resource
   
-     SSH in and install Flyspray into the web root:
-       aws lightsail ssh --instance-name flyspray-app --region us-east-1
+  Correct way to SSH in
 
-     On the instance:
+Step 1 — Download your Lightsail default key pair
+
+aws lightsail download-default-key-pair \
+  --region us-east-1 \
+  --query 'privateKeyBase64' \
+  --output text | base64 --decode > ~/.ssh/lightsail-default.pem
+
+chmod 600 ~/.ssh/lightsail-default.pem
+Run in CloudShell
+
+Step 2 — SSH in using the Bitnami user
+
+ssh -i ~/.ssh/lightsail-default.pem bitnami@<INSTANCE_IP>
+Run in CloudShell
+
+Replace <INSTANCE_IP>
+with your static IP — you can look it up with:
+
+aws lightsail get-static-ip \
+  --static-ip-name flyspray-app-static-ip \
+  --region us-east-1 \
+  --query 'staticIp.ipAddress' \
+  --output text
+
+
+  
+   On the instance:
        cd /opt/bitnami/apache/htdocs
        sudo wget https://github.com/flyspray/flyspray/releases/download/v1.0/flyspray-1.0.tar.gz
        sudo tar xzf flyspray-1.0.tar.gz
