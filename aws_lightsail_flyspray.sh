@@ -279,7 +279,7 @@ log "Enabling automatic backups on database (window: ${DB_BACKUP_WINDOW} UTC)...
 aws lightsail update-relational-database \
   --relational-database-name "$DB_INSTANCE_NAME" \
   --preferred-backup-window "$DB_BACKUP_WINDOW" \
-  --backup-retention-enabled \
+  --enable-backup-retention \
   --region "$REGION" \
   --output text > /dev/null
 
