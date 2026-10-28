@@ -29,7 +29,7 @@ in the AWS console.
  - terminal with shell interpreter.  This is a shell script to be run from the terminal
  - bash > version 4.  On Mac this will require installing bash, easiest with homebrew
    Mac: `brew install bash`  
- - AWS CLI: see [Installing AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+ - AWS CLIv2: see [Installing AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
  - a working subdomain that you have control of and can work
    with ssl certificates.  That usually involves editing DNS records on your domain
    registrar.  For example flyspray.mydomain.whatever
@@ -45,14 +45,61 @@ set in the
 
 ## Running 
 
-1. Set the AWS config.  See https://docs.aws.amazon.com/cli/latest/reference/configure/
+### 1. Set the AWS config.  See https://docs.aws.amazon.com/cli/latest/reference/configure/
 for how to do this.  For one, you need to do this and log-in to AWS in order for this
 script to run.
 
-2. Set environment variables... TBD
+### 2. Set variables
+Variables with Secrets () have NO default and will
+cause the script to exit if not supplied via environment. Other variables have
+no reasonable 'default' value so you must set those, too. 
+
+export APP_PASSWORD=
+export DB_MASTER_PASSWORD=
+export APP_HOSTNAME=
+export SSL_EMAIL=
+
+You could put these things in a  file and source it
+
+For example, `aws_flyspray_config.sh`  ( **DON'T CHEDCK THIS INTO GIT**)
+
+then, before each run, do `source aws_flyspray_config.sh`
+
+(using the source command ensure the variables are set in current shell
+environment and not a subshell)
+
+### 3. Run with command line options (see below)
+
+`./deploy_flyspray.sh option1, option2 option2`
+
+### Usage examples:
+
+Minimum options set: 
+```
+export FLYSPRAY_DB_MASTER_PASSWORD="..."
+export FLYSPRAY_APP_PASSWORD="..."
+export FLYSPRAY_HOSTNAME="flyspray.example.com"
+export FLYSPRAY_SSL_EMAIL="admin@example.com"
+./deploy_flyspray.sh
+```
+
+Override instance name and hostname via positional args:
+
+```
+# set vars as above
+./deploy_flyspray.sh flyspray-dev dev.example.com admin@example.com
+```
 
 
-see header in scripts
+Create a Dev/test version of a FlySpray server with a different LightSail 
+type (aka bundle) :
+
+```
+# export required options as above
+export FLYSPRAY_INSTANCE_BUNDLE="nano_3_0"
+export FLYSPRAY_DB_BUNDLE="micro_2_0"
+./deploy_flyspray.sh flyspray-dev fs-dev.example.com admin@example.com
+```
 
 ## Outputs 
 
