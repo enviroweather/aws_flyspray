@@ -1,6 +1,10 @@
+# deprecated version
+# see ./deploy_flyspray.sh and README 
+# - kept for now to preserve some edits
+
 #!/usr/bin/env bash
 # =============================================================================
-# deploy_flyspray.sh  
+# aws_lightsail_flyspray.sh  
 #
 # requires bash > v4.  Will not run on MacOS without newer bash installed
 #
