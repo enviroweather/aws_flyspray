@@ -45,6 +45,7 @@ set in the
 
 ## Running 
 
+
 ### 1. Set the AWS config.  See https://docs.aws.amazon.com/cli/latest/reference/configure/
 for how to do this.  For one, you need to do this and log-in to AWS in order for this
 script to run.
@@ -59,11 +60,11 @@ export DB_MASTER_PASSWORD=
 export APP_HOSTNAME=
 export SSL_EMAIL=
 
-You could put these things in a  file and source it
+You could put these things in a .env file and source it
 
-For example, `aws_flyspray_config.sh`  ( **DON'T CHEDCK THIS INTO GIT**)
+For example, `.env`  ( **DON'T CHECK THIS INTO GIT**)
 
-then, before each run, do `source aws_flyspray_config.sh`
+then, before each run, do `source .env`
 
 (using the source command ensure the variables are set in current shell
 environment and not a subshell)
@@ -224,3 +225,39 @@ aws lightsail create-relational-database-from-snapshot \
   --availability-zone ${LIGHTSAIL_REGION}a \
   --region $LIGHTSAIL_REGION
 ```
+
+## Things go wrong, clean it up 
+
+Sometimes the system creation does not go as planned and you end up with 
+unfinished resources.  The `./cleanup_flyspray.sh` deletes the stuff that 
+was created.  **WARNING** This script will delete everything including the 
+database.  If this is run before a snapshot, it will all be gone.  
+
+# Terraform 
+
+working on terraform scripts 
+
+aws_flyspray/
+├── terraform/
+│   ├── main.tf           # all Lightsail resources
+│   ├── variables.tf      # all inputs (mirrors FLYSPRAY_* env vars)
+│   ├── outputs.tf        # instance IP, DB endpoint, generated file paths
+│   ├── terraform.tfvars  # non-secret defaults (hostname, bundles, region)
+│   └── scripts/
+│       ├── import_db.sh  # psql steps (procedural — stays as bash)
+│       └── setup_ssl.sh  # generated after apply (stays as bash)
+
+What Terraform handles vs what stays bash
+Task	Tool	Why
+Instance, DB, static IP, firewall, snapshots	Terraform	Pure infrastructure state
+SQL dump download + psql import	bash (import_db.sh
+)	Procedural data operation, not infrastructure
+SSL provisioning (bncert
+)	bash (setup_ssl.sh
+)	Requires DNS to be live first, interactive tool
+flyspray.conf.php
+	Terraform local_file
+resource	Terraform knows all the values at apply time
+
+Cleanup is terraform destroy
+— no separate script needed.
