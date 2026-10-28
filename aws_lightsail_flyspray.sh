@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy_flyspray.sh  (v5 — parameterised, env-aware)
+# deploy_flyspray.sh  
+#
+# requires bash > v4.  Will not run on MacOS without newer bash installed
 #
 # Variable resolution order (highest to lowest priority):
 #   1. CLI positional arguments  ($1, $2, $3)
@@ -148,6 +150,8 @@ APP_PASSWORD="${FLYSPRAY_APP_PASSWORD:-}"
 require APP_PASSWORD "App DB password — set FLYSPRAY_APP_PASSWORD"
 
 # --- S3 dump source ---
+# TODO: use require for these
+# TODO make the 
 S3_BUCKET="ewx-flyspray-941061635635-us-east-1-an"
 S3_DUMP_KEY="flyspray_22_10_2026.sql"
 LOCAL_DUMP="/tmp/flyspray_dump.sql"
@@ -309,6 +313,10 @@ aws s3 cp "s3://$S3_BUCKET/$S3_DUMP_KEY" "$LOCAL_DUMP" --region "$REGION"
 # ---------------------------------------------------------------------------
 export PGPASSWORD="$DB_MASTER_PASSWORD"
 
+# TODO change the dump file so this is not necessary
+# our current dumps come from a very old version of Postgres, and prior to 
+# vs 15, it was not allows to create a 'public' schema and refer to it
+# this command re-allows that, but it's a work-around
 log "Granting public schema privileges (required for PG15+)..."
 psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$DB_INITIAL_NAME" <<SQL
 GRANT ALL ON SCHEMA public TO "$DB_MASTER_USER";
@@ -333,6 +341,9 @@ psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$APP_DB" <<SQL
 GRANT ALL ON SCHEMA public TO "$DB_MASTER_USER";
 GRANT USAGE, CREATE ON SCHEMA public TO "$APP_USER";
 SQL
+
+## TODO make this optional and make the S3 bucket and key a CLI param
+# that, if not sent, no import happens
 
 log "Importing SQL dump into '$APP_DB'..."
 psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$APP_DB" \
