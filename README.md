@@ -92,13 +92,31 @@ Override instance name and hostname via positional args:
 
 
 Create a Dev/test version of a FlySpray server with a different LightSail 
-type (aka bundle) :
+type (aka bundle). This builds a second instances with 
+"dev" name.  For this to work you'd have to create an additional sub-domain for 
+flyspray-dev ,and also run the script for ssl. 
+ 
 
 ```
-# export required options as above
+# export required passwod options, same as above
+# then set these to override default resource sizes
 export FLYSPRAY_INSTANCE_BUNDLE="nano_3_0"
 export FLYSPRAY_DB_BUNDLE="micro_2_0"
-./deploy_flyspray.sh flyspray-dev fs-dev.example.com admin@example.com
+./deploy_flyspray.sh flyspray-dev flyspray-dev.example.com admin@example.com
+```
+
+Example production AND dev/test invocation. 
+```
+# Set secrets once in your shell session
+export FLYSPRAY_DB_MASTER_PASSWORD="..."
+export FLYSPRAY_APP_PASSWORD="..."
+
+# Production
+./deploy_flyspray.sh flyspray-prod flyspray.example.com admin@example.com
+
+# Dev/test — nano instance, different name, same secrets already exported
+export FLYSPRAY_INSTANCE_BUNDLE="nano_3_0"
+./deploy_flyspray.sh flyspray-dev 
 ```
 
 ## Outputs 
