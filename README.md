@@ -125,8 +125,9 @@ export FLYSPRAY_INSTANCE_BUNDLE="nano_3_0"
 ### setup_ssl.sh
     
 is generated automatically at /tmp/setup_ssl.sh
-as part of the script run. It includes a DNS verification check before attempting the certificate — if your A record hasn't propagated yet it will exit cleanly with a clear error rather than failing mid-way through bncert
-    .
+as part of the script run.
+
+
 ### flyspray.conf.php
 
 is created for the app based on variables set here.  In the Lightsail instance,
@@ -140,6 +141,117 @@ Two things to double-check before running
     must be available on the machine running setup_ssl.sh
     — it's used to verify DNS propagation. On macOS it's built in; on Ubuntu/Debian: apt install dnsutils
     .
+
+### deployment report
+
+Details about the deployment are printed to the screen including the 
+IPv4 address needed to setup the sub-domain, and names of the instance, 
+needed to log-in.  see the deployment report example
+
+** *NOTE* as of right now the report has instructions that don't work for 
+ssh'ing into the Lightsail instance but will be updated soon**
+
+
+
+## Post-install 
+
+### Actually Install Flyspray app
+
+The deploy_flyspray.sh script only creates the LightSail instance, but does
+not actually put the flyspray code/app on it.  You have to log in and
+do that.   
+  
+Step 1 — Download your new Lightsail default key pair
+
+```
+REGION=us-east-1  # replace this with your actual region above
+aws lightsail download-default-key-pair \
+  --region us-east-1 \
+  --query 'privateKeyBase64' \
+  --output text | base64 --decode > ~/.ssh/lightsail-default.pem
+
+chmod 600 ~/.ssh/lightsail-default.pem
+```
+
+
+Step 2 — SSH in using the Bitnami user. 
+
+this requires the instance IP from deployment. Given the instance 
+name used in the script, you can use a command to get it
+
+TODO: look at deployment script and set these values into the env
+while it's running.  
+
+```
+export INSTANCE_IP_NAME=flyspray-app-static-ip
+export REGION=us-east-1
+export INSTANCE_IP=aws lightsail get-static-ip \
+  --static-ip-name $INSTANCE_IP_NAME \
+  --region $REGION \
+  --query 'staticIp.ipAddress' \
+  --output text
+
+# not actually sure if this will work
+ssh -i ~/.ssh/lightsail-default.pem bitnami@${INSTANCE_IP}
+```
+
+Step 3. Copy app into the instance
+
+after ssh'ing in, run the following on the instance 
+
+```
+cd /opt/bitnami/apache/htdocs
+sudo wget https://github.com/flyspray/flyspray/releases/download/v1.0/flyspray-1.0.tar.gz
+sudo tar xzf flyspray-1.0.tar.gz
+sudo mv flyspray/* .
+sudo mv flyspray/.htaccess . 2>/dev/null || true
+sudo rm -rf flyspray flyspray-1.0.tar.gz
+```
+
+### Place config file created by deploy script
+  
+The deployment script creates an appropriate conf file and saves it in /tmp
+  
+Copy flyspray.conf.php to the instance. This assumes you have keys in place
+TODO use -i flag on scp to reference the key downloaded above
+
+Step 1. copy into instance
+
+```
+scp /tmp/flyspray.conf.php bitnami@x.x.x.x:/tmp/
+```
+
+Step 2. move it into the correct place
+
+```
+ssh -i ~/.ssh/lightsail-default.pem bitnami@${INSTANCE_IP}
+```
+
+Then on the instance
+
+```
+sudo mv /tmp/flyspray.conf.php /opt/bitnami/apache/htdocs/
+sudo chown -R bitnami:daemon /opt/bitnami/apache/htdocs
+sudo chmod -R 775 /opt/bitnami/apache/htdocs/attachments
+```
+
+### add ssl for proper security
+
+Getting SSL installed requires the hostname to be properly configured and 
+running. 
+
+First, add the IP adress output 
+ It includes a DNS verification check before 
+attempting the certificate using `dig` 
+If your A record hasn't propagated yet it will exit cleanly 
+with a clear error rather than failing mid-way through bncert.  Give the 
+Internet some time to learn the new IP adress.  
+
+This verification uses the `dig` command.  If you are running the AWS cloud
+shell, it's not installed by default.   You can install the dig tool 
+on AWS CloudShell by running `sudo yum install -y bind-utils`
+
+This script only creates the empty service - it doesn't automatically download 
 
 Order of operations after the script finishes
 
