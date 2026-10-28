@@ -216,7 +216,13 @@ aws lightsail create-instances \
   --output text > /dev/null
 
 # ---------------------------------------------------------------------------
-# STEP 3 — Open HTTP and HTTPS firewall ports
+# STEP 3 — Wait for both resources to be ready
+# ---------------------------------------------------------------------------
+wait_for_instance "$INSTANCE_NAME"
+wait_for_db      "$DB_INSTANCE_NAME"
+
+# ---------------------------------------------------------------------------
+# STEP 4 — Open HTTP and HTTPS firewall ports
 #           HTTP (80) required for Let's Encrypt domain challenge.
 #           HTTPS (443) for normal access after SSL is provisioned.
 # ---------------------------------------------------------------------------
