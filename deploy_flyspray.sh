@@ -112,8 +112,8 @@ resolve_vars() {
   LOCAL_DUMP="/tmp/flyspray_dump.sql"
 
   # --- Snapshot schedule (UTC) ---
-  INSTANCE_SNAPSHOT_TIME="02:00"
-  DB_BACKUP_WINDOW="03:00-03:30"
+  export INSTANCE_SNAPSHOT_TIME="06:00"
+  export DB_BACKUP_WINDOW="07:00-07:30"
 
   # --- Output paths ---
   OUTPUT_CONF="/tmp/flyspray.conf.php"
