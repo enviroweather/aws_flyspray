@@ -153,22 +153,39 @@ ssh'ing into the Lightsail instance but will be updated soon**
 
 
 
-## Post-install 
+## Post-resource building: install  
 
-### Actually Install Flyspray app
+**Actually Install Flyspray app**
 
 The deploy_flyspray.sh script only creates the LightSail instance, but does
 not actually put the flyspray code/app on it.  You have to log in and
 do that.   
-  
-Step 1 — Download your new Lightsail default key pair
+
+### Post-install Step 0.  Load up the environment
+
+```
+export REGION=$(aws configure get region 2>/dev/null || echo "")
+export REGION=${REGION:-us-east-1}
+export AZ="${REGION}a"
+
+# change this one.. 
+export INSTANCE_IP_NAME=flyspray-app-static-ip
+# get the IP address
+export INSTANCE_IP=$(aws lightsail get-static-ip \
+  --static-ip-name $INSTANCE_IP_NAME \
+  --region $REGION \
+  --query 'staticIp.ipAddress' \
+  --output text)
+
+
+Step 1. Download your new Lightsail default key pair
 
 ```
 REGION=us-east-1  # replace this with your actual region above
 aws lightsail download-default-key-pair \
   --region us-east-1 \
   --query 'privateKeyBase64' \
-  --output text | base64 --decode > ~/.ssh/lightsail-default.pem
+  --output text  > ~/.ssh/lightsail-default.pem
 
 chmod 600 ~/.ssh/lightsail-default.pem
 ```
@@ -183,14 +200,6 @@ TODO: look at deployment script and set these values into the env
 while it's running.  
 
 ```
-export INSTANCE_IP_NAME=flyspray-app-static-ip
-export REGION=us-east-1
-export INSTANCE_IP=aws lightsail get-static-ip \
-  --static-ip-name $INSTANCE_IP_NAME \
-  --region $REGION \
-  --query 'staticIp.ipAddress' \
-  --output text
-
 # not actually sure if this will work
 ssh -i ~/.ssh/lightsail-default.pem bitnami@${INSTANCE_IP}
 ```
@@ -200,12 +209,22 @@ Step 3. Copy app into the instance
 after ssh'ing in, run the following on the instance 
 
 ```
-cd /opt/bitnami/apache/htdocs
-sudo wget https://github.com/flyspray/flyspray/releases/download/v1.0/flyspray-1.0.tar.gz
-sudo tar xzf flyspray-1.0.tar.gz
-sudo mv flyspray/* .
-sudo mv flyspray/.htaccess . 2>/dev/null || true
-sudo rm -rf flyspray flyspray-1.0.tar.gz
+
+
+export SERVER_DIR=/opt/bitnami/apache/htdocs
+export FLYSPRAY_VERSION=1.0-rc11
+export flyspray_download_link="https://github.com/flyspray/flyspray/releases/download/v${FLYSPRAY_VERSION}/flyspray-${FLYSPRAY_VERSION}.tgz"
+
+cd /tmp
+sudo rm fs.tgz # just in case
+sudo wget $flyspray_download_link --output-file=fs.tgz
+sudo tar xzf fs.tgz
+cd flyspray-${FLYSPRAY_VERSION}
+sudo mv * $SERVER_DIR
+sudo mv .htaccess $SERVER_DIR 2>/dev/null || true
+cd ..
+sudo rm -rf flyspray-${FLYSPRAY_VERSION} fs.tgz
+exit
 ```
 
 ### Place config file created by deploy script
@@ -218,7 +237,7 @@ TODO use -i flag on scp to reference the key downloaded above
 Step 1. copy into instance
 
 ```
-scp /tmp/flyspray.conf.php bitnami@x.x.x.x:/tmp/
+scp /tmp/flyspray.conf.php bitnami@${INSTANCE_IP}:/tmp/flyspray.conf.php
 ```
 
 Step 2. move it into the correct place
