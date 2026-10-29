@@ -181,7 +181,6 @@ export INSTANCE_IP=$(aws lightsail get-static-ip \
 Step 1. Download your new Lightsail default key pair
 
 ```
-REGION=us-east-1  # replace this with your actual region above
 aws lightsail download-default-key-pair \
   --region us-east-1 \
   --query 'privateKeyBase64' \
