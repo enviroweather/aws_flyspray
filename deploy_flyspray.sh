@@ -378,6 +378,7 @@ else
   aws lightsail update-relational-database \
     --relational-database-name "$DB_INSTANCE_NAME" \
     --preferred-backup-window "$DB_BACKUP_WINDOW" \
+    --preferred-maintenance-window  sun:00:00-sun:01:00  \
     --enable-backup-retention \
     --region "$REGION" \
     --output text > /dev/null
