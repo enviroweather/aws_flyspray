@@ -13,7 +13,7 @@
 #   read -s -p "App password: "       TF_VAR_app_password       && export TF_VAR_app_password
 # =============================================================================
 
-region      = "us-east-1"
+region      = "us-east-2"
 environment = "prod"
 
 # --- Instance ---
