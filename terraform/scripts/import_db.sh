@@ -15,6 +15,15 @@ set -euo pipefail
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 err() { echo "[ERROR] $*" >&2; exit 1; }
 
+# Ensure psql is in PATH (common Homebrew libpq location on macOS)
+if ! command -v psql &>/dev/null; then
+  if [[ -x "/opt/homebrew/opt/libpq/bin/psql" ]]; then
+    export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
+  elif [[ -x "/usr/local/opt/libpq/bin/psql" ]]; then
+    export PATH="/usr/local/opt/libpq/bin:$PATH"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Read all values from Terraform outputs — no config duplication
 # ---------------------------------------------------------------------------
@@ -22,6 +31,7 @@ log "Reading Terraform outputs..."
 DB_ENDPOINT=$(terraform output -raw db_endpoint)
 DB_PORT=$(terraform output -raw db_port)
 INSTANCE_NAME=$(terraform output -raw instance_name)
+DB_INSTANCE_NAME=$(terraform output -raw db_instance_name 2>/dev/null || echo "${TF_VAR_db_instance_name:-ewx-flyspray-db}")
 
 REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
 REGION=${REGION:-us-east-1}
@@ -31,7 +41,6 @@ S3_BUCKET="${TF_VAR_s3_bucket:-ewx-flyspray-941061635635-us-east-1-an}"
 S3_DUMP_KEY="${TF_VAR_s3_dump_key:-flyspray_22_10_2026.sql}"
 APP_DB="${TF_VAR_app_db:-flyspray}"
 APP_USER="${TF_VAR_app_user:-flyspray_user}"
-DB_INSTANCE_NAME="${TF_VAR_db_instance_name:-flyspray-db}"
 DB_MASTER_USER="dbmaster"
 LOCAL_DUMP="/tmp/flyspray_dump.sql"
 

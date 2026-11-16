@@ -38,6 +38,12 @@ variable "instance_snapshot_time" {
   default     = "02:00"
 }
 
+variable "flyspray_version" {
+  description = "Flyspray release version to install (e.g. 1.0)."
+  type        = string
+  default     = "1.0"
+}
+
 # ---------------------------------------------------------------------------
 # Hostname and SSL
 # ---------------------------------------------------------------------------

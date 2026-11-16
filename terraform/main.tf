@@ -52,6 +52,73 @@ resource "aws_lightsail_instance" "flyspray" {
   blueprint_id      = "lamp_8_bitnami"
   bundle_id         = var.instance_bundle
 
+  # Automatically install Flyspray and configure Apache / PHP on first boot
+  user_data = <<-EOF
+    #!/bin/bash
+    set -e
+    exec > /var/log/flyspray-setup.log 2>&1
+    echo "Starting automated Flyspray setup..."
+
+    # 1. Enable PostgreSQL extension in PHP if commented out
+    if [ -f /opt/bitnami/php/etc/php.ini ]; then
+      sed -i 's/;extension=pdo_pgsql/extension=pdo_pgsql/' /opt/bitnami/php/etc/php.ini
+      sed -i 's/;extension=pgsql/extension=pgsql/' /opt/bitnami/php/etc/php.ini
+      /opt/bitnami/ctlscript.sh restart php-fpm || true
+    fi
+
+    # 2. Download and extract Flyspray
+    HTDOCS="/opt/bitnami/apache/htdocs"
+    mkdir -p "$HTDOCS"
+    cd /tmp
+
+    FLYSPRAY_URL="https://github.com/flyspray/flyspray/releases/download/v${var.flyspray_version}/flyspray-${var.flyspray_version}.tar.gz"
+    echo "Downloading Flyspray from $FLYSPRAY_URL..."
+    wget -q "$FLYSPRAY_URL" -O flyspray.tar.gz
+    tar -xzf flyspray.tar.gz
+
+    # Remove default Bitnami welcome page
+    rm -f "$HTDOCS/index.html"
+
+    # Copy Flyspray files into Apache root
+    cp -a flyspray/. "$HTDOCS/"
+    rm -rf flyspray flyspray.tar.gz
+
+    # 3. Create flyspray.conf.php directly
+    cat > "$HTDOCS/flyspray.conf.php" << 'CONF'
+    <?php
+    ####################################################################
+    # Flyspray configuration file — generated automatically by Terraform
+    # Location: /opt/bitnami/apache/htdocs/flyspray.conf.php
+    ####################################################################
+
+    [database]
+    dbtype   = pgsql
+    host     = ${aws_lightsail_database.flyspray.master_endpoint_address}
+    port     = ${aws_lightsail_database.flyspray.master_endpoint_port}
+    dbname   = ${var.app_db}
+    dbprefix = flyspray_
+    dbuser   = ${var.app_user}
+    dbpass   = ${var.app_password}
+
+    [general]
+    base_url      = https://${var.app_hostname}
+    attachmentdir = ./attachments
+    logfile       = ./flyspray.log
+    CONF
+
+    # 4. Set directory and file permissions
+    mkdir -p "$HTDOCS/attachments"
+    touch "$HTDOCS/flyspray.log"
+    chown -R bitnami:daemon "$HTDOCS"
+    chmod -R 775 "$HTDOCS/attachments"
+    chmod 664 "$HTDOCS/flyspray.log"
+    chmod 640 "$HTDOCS/flyspray.conf.php"
+
+    # 5. Restart Apache
+    /opt/bitnami/ctlscript.sh restart apache || true
+    echo "Flyspray automated setup complete."
+  EOF
+
   tags = {
     Project     = "flyspray"
     Environment = var.environment
