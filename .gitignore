@@ -7,6 +7,9 @@
 # this may already be in git, but htere are no secrets currently (see .env)
 *.tfvars
 *.tfvars.json
+*.tfplan
+
+*.php
 
 
 # Local .terraform directories

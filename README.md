@@ -56,7 +56,9 @@ This repository contains the [Terraform](https://www.terraform.io/) configuratio
 
 1. **AWS Account & CLI**:
    * An active AWS account with permissions to manage Lightsail and S3.
-   * AWS credentials configured locally (`aws configure`).
+   * grant access to Lightsail for AWS account
+   * Generate AWS credentials in IAM console,and configured locally (`aws configure`).
+   
 2. **Workstation Tools**:
    * **Terraform** (or OpenTofu): `brew install hashicorp/tap/terraform`
    * **AWS CLI v2**: `brew install awscli`
@@ -92,6 +94,53 @@ aws_flyspray/
 ## Deployment Workflow
 
 Always run Terraform from your **local machine / laptop** rather than ephemeral cloud shells, ensuring your `terraform.tfstate` file is safely persisted on disk.
+
+### Step 0: get a working IAM user
+
+At our institution you can't use SSO, you have to create an IAM user.  See
+online how to do that and to create CLI credentials.  If you have a better
+way then GFI but here this is what we do. 
+
+after creating the user, you need to grant that user permissions.  This is possible
+in the cloudshell of your SSO account in the console.  
+
+since the users on in your computer's CLI have limited permissions, you have
+to run this in the cloudshell with your log-in user
+
+
+```bash
+export FLYSPRAY_IAM_USER=<user you created above>
+aws iam put-user-policy \
+  --user-name $FLYSPRAY_IAM_USER \
+  --policy-name LightsailFullAccess \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "lightsail:*",
+        "Resource": "*"
+      }
+    ]
+  }'
+
+```
+
+Check the permissions are there
+
+```bash
+aws iam list-user-policies --user-name $FLYSPRAY_IAM_USER
+```
+
+It should say 
+
+```JSON
+{
+    "PolicyNames": [
+        "LightsailFullAccess"
+    ]
+}
+```
 
 ### Step 1: Upload Your Database Dump to S3
 
