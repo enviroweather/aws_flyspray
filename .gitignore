@@ -56,4 +56,4 @@ terraform.rc
 .DS_Store
 
 # no AI for now
-.agent
+.agents
