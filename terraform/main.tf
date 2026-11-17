@@ -180,9 +180,14 @@ resource "aws_lightsail_instance_public_ports" "flyspray" {
 
 # ---------------------------------------------------------------------------
 # Static IP — allocated and attached to the instance
+# prevent terraform from destroying, ever
 # ---------------------------------------------------------------------------
 resource "aws_lightsail_static_ip" "flyspray" {
   name = local.static_ip_name
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_lightsail_static_ip_attachment" "flyspray" {
