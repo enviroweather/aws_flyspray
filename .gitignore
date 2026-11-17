@@ -55,3 +55,5 @@ terraform.rc
 # mac junk
 .DS_Store
 
+# no AI for now
+.agent
