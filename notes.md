@@ -1,5 +1,19 @@
 # Notes on building flyspray instance on AWS lightsail
 
+### 11/17 2pm
+
+All checks pass. Summary of the redesign addressing your corrections:
+
+No local Docker — build.tf adds an ECR repo, an S3 bucket holding a zipped container source (via archive_file, no Docker needed to prepare it), an IAM role, and an aws_codebuild_project. CodeBuild's standard:7.0 Linux image runs natively on x86_64, so a plain docker build inside CodeBuild produces a correct AMD64 image — no --platform flag, buildx, or local Docker install needed anywhere. Trigger it with start_build.sh, which only needs terraform + aws CLI.
+
+Lightsail pulls straight from ECR — container.tf now sets private_registry_access { ecr_image_puller_role } on the service and grants that role pull access via aws_ecr_repository_policy, so there's no push-container-image/lightsailctl step at all.
+
+Simplified secrets — removed flyspray_config_base64 entirely. configure.php now builds flyspray.conf.php from discrete env vars: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS, DB_PREFIX, COOKIE_SALT, APP_BASE_URL, SYNTAX_PLUGIN. Terraform sets these on the Lightsail deployment from TF_VAR_* values (your existing .env mechanism) — no secrets baked into the image.
+
+Answering your question directly: yes — Flyspray has no native env-var support (confirmed from its source), but the configure.php entrypoint shim generates its config file from env vars at container startup, so DB credentials can be set as plain Lightsail environment variables sourced from .env.
+
+Updated variables.tf, outputs.tf, tests, terraform.tfvars/.example.txt, example.env.txt, .gitignore, and README accordingly. All validated: terraform validate/fmt/test (3/3 pass), php -l, and the bash config test pass. No real apply has been run — the next step is a real AWS apply starting with the service/certificate/CodeBuild stage.
+
 ### 11/16 11pm 
 
 add this to prevent IP address from being destroyed:

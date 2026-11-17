@@ -1,5 +1,11 @@
 # FlySpray PHP app on AWS Lightsail with Docker
 
+> Historical AI-generated proposal, not deployment instructions. Several claims
+> and commands below are incorrect or unsafe, including static IP reuse by
+> containers, the `latest` Lightsail image reference, the `NO_SOURCE` build,
+> certificate setup, and persistent attachments. Follow [README.md](README.md)
+> for the current implementation and migration procedure instead.
+
 This describes a transition from AWS Lightsail instances to containers, given 
 a start on Terraform and scripts to build using an AWS LAMP blueprint.  
 
