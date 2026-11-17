@@ -44,80 +44,107 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Lightsail instance (LAMP PHP 8 Bitnami)
+# Lightsail instance (LAMP PHP 8 - AWS native lamp_ls_1_0)
 # ---------------------------------------------------------------------------
 resource "aws_lightsail_instance" "flyspray" {
   name              = var.instance_name
   availability_zone = local.az
-  blueprint_id      = "lamp_8_bitnami"
+  blueprint_id      = "lamp_ls_1_0"
   bundle_id         = var.instance_bundle
 
   # Automatically install Flyspray and configure Apache / PHP on first boot
   user_data = <<-EOF
-    #!/bin/bash
-    set -e
-    exec > /var/log/flyspray-setup.log 2>&1
-    echo "Starting automated Flyspray setup..."
+      #!/bin/bash
+      set -e
+      exec > /var/log/flyspray-setup.log 2>&1
+      echo "Starting automated Flyspray setup..."
 
-    # 1. Enable PostgreSQL extension in PHP if commented out
-    if [ -f /opt/bitnami/php/etc/php.ini ]; then
-      sed -i 's/;extension=pdo_pgsql/extension=pdo_pgsql/' /opt/bitnami/php/etc/php.ini
-      sed -i 's/;extension=pgsql/extension=pgsql/' /opt/bitnami/php/etc/php.ini
-      /opt/bitnami/ctlscript.sh restart php-fpm || true
-    fi
+      # 1. Wait for cloud-init / yum lock to release (lamp_ls_1_0 runs its own
+      #    post-boot setup; give it up to 2 minutes before we proceed)
+      for i in $(seq 1 24); do
+        if ! pgrep -x yum > /dev/null && ! pgrep -x dnf > /dev/null; then
+          break
+        fi
+        echo "Waiting for package manager to be free... ($i)"
+        sleep 5
+      done
 
-    # 2. Download and extract Flyspray
-    HTDOCS="/opt/bitnami/apache/htdocs"
-    mkdir -p "$HTDOCS"
-    cd /tmp
+      # 2. Install PostgreSQL 16 client + PHP PostgreSQL extensions
+      dnf install -y postgresql16 php-pdo php-pgsql php-pdo_pgsql
 
-    FLYSPRAY_URL="https://github.com/flyspray/flyspray/releases/download/v${var.flyspray_version}/flyspray-${var.flyspray_version}.tar.gz"
-    echo "Downloading Flyspray from $FLYSPRAY_URL..."
-    wget -q "$FLYSPRAY_URL" -O flyspray.tar.gz
-    tar -xzf flyspray.tar.gz
+      # 3. Enable pdo_pgsql / pgsql in PHP config
+      #    lamp_ls_1_0 drops extension configs in /etc/php.d/
+      #    The dnf install above usually creates these automatically, but
+      #    ensure they are not commented out just in case.
+      PHP_D="/etc/php.d"
+      for ext in pdo_pgsql pgsql; do
+        if [ -f "$PHP_D/30-$ext.ini" ]; then
+          sed -i "s/^;extension=$ext/extension=$ext/" "$PHP_D/30-$ext.ini"
+        else
+          echo "extension=$ext" > "$PHP_D/30-$ext.ini"
+        fi
+      done
 
-    # Remove default Bitnami welcome page
-    rm -f "$HTDOCS/index.html"
+      # 4. Restart PHP-FPM to pick up new extensions
+      systemctl restart php-fpm
 
-    # Copy Flyspray files into Apache root
-    cp -a flyspray/. "$HTDOCS/"
-    rm -rf flyspray flyspray.tar.gz
+      # 5. Download and extract Flyspray into the web root
+      HTDOCS="/var/www/html"
+      cd /tmp
 
-    # 3. Create flyspray.conf.php directly
-    cat > "$HTDOCS/flyspray.conf.php" << 'CONF'
-    <?php
-    ####################################################################
-    # Flyspray configuration file — generated automatically by Terraform
-    # Location: /opt/bitnami/apache/htdocs/flyspray.conf.php
-    ####################################################################
+      FLYSPRAY_URL="https://github.com/flyspray/flyspray/releases/download/v${var.flyspray_version}/flyspray-${var.flyspray_version}.tar.gz"
+      echo "Downloading Flyspray from $FLYSPRAY_URL..."
+      wget -q "$FLYSPRAY_URL" -O flyspray.tar.gz
+      tar -xzf flyspray.tar.gz
 
-    [database]
-    dbtype   = pgsql
-    host     = ${aws_lightsail_database.flyspray.master_endpoint_address}
-    port     = ${aws_lightsail_database.flyspray.master_endpoint_port}
-    dbname   = ${var.app_db}
-    dbprefix = flyspray_
-    dbuser   = ${var.app_user}
-    dbpass   = ${var.app_password}
+      # Remove default LAMP welcome page
+      rm -f "$HTDOCS/index.html" "$HTDOCS/index.php"
 
-    [general]
-    base_url      = https://${var.app_hostname}
-    attachmentdir = ./attachments
-    logfile       = ./flyspray.log
-    CONF
+      # Copy Flyspray files into Apache root
+      cp -a flyspray/. "$HTDOCS/"
+      rm -rf flyspray flyspray.tar.gz
 
-    # 4. Set directory and file permissions
-    mkdir -p "$HTDOCS/attachments"
-    touch "$HTDOCS/flyspray.log"
-    chown -R bitnami:daemon "$HTDOCS"
-    chmod -R 775 "$HTDOCS/attachments"
-    chmod 664 "$HTDOCS/flyspray.log"
-    chmod 640 "$HTDOCS/flyspray.conf.php"
+      # 6. Write flyspray.conf.php
+      cat > "$HTDOCS/flyspray.conf.php" << 'CONF'
+  <?php
+  ####################################################################
+  # Flyspray configuration file - generated automatically by Terraform
+  # Location: /var/www/html/flyspray.conf.php
+  ####################################################################
 
-    # 5. Restart Apache
-    /opt/bitnami/ctlscript.sh restart apache || true
-    echo "Flyspray automated setup complete."
-  EOF
+  [database]
+  dbtype   = pgsql
+  host     = ${aws_lightsail_database.flyspray.master_endpoint_address}
+  port     = ${aws_lightsail_database.flyspray.master_endpoint_port}
+  dbname   = ${var.app_db}
+  dbprefix = flyspray_
+  dbuser   = ${var.app_user}
+  dbpass   = ${var.app_password}
+
+  [general]
+  base_url      = https://${var.app_hostname}
+  attachmentdir = ./attachments
+  logfile       = ./flyspray.log
+  CONF
+
+      # 7. Set directory and file permissions
+      mkdir -p "$HTDOCS/attachments"
+      touch "$HTDOCS/flyspray.log"
+      chown -R apache:apache "$HTDOCS"
+      chmod -R 775 "$HTDOCS/attachments"
+      chmod 664 "$HTDOCS/flyspray.log"
+      chmod 640 "$HTDOCS/flyspray.conf.php"
+
+      # 8. Allow Apache to write to attachments (SELinux is active on AL2023)
+      setsebool -P httpd_unified 1 || true
+      chcon -Rt httpd_sys_rw_content_t "$HTDOCS/attachments" || true
+      chcon -t httpd_sys_rw_content_t "$HTDOCS/flyspray.log" || true
+      chcon -t httpd_sys_content_t "$HTDOCS/flyspray.conf.php" || true
+
+      # 9. Restart Apache
+      systemctl restart httpd
+      echo "Flyspray automated setup complete."
+    EOF
 
   tags = {
     Project     = "flyspray"
@@ -242,7 +269,7 @@ resource "local_file" "flyspray_conf" {
 }
 
 # ---------------------------------------------------------------------------
-# setup_ssl.sh — written to output/ after apply, ready to run post-DNS
+# setup_ssl.sh - written to output/ after apply, ready to run post-DNS
 # ---------------------------------------------------------------------------
 resource "local_file" "setup_ssl" {
   filename        = "${path.module}/output/setup_ssl.sh"
@@ -250,7 +277,7 @@ resource "local_file" "setup_ssl" {
 
   content = <<-BASH
     #!/usr/bin/env bash
-    # Generated by Terraform — run AFTER DNS A record is live and propagated.
+    # Generated by Terraform - run AFTER DNS A record is live and propagated.
     # Verify: dig +short ${var.app_hostname}
     #         # should return: ${aws_lightsail_static_ip.flyspray.ip_address}
     set -euo pipefail
@@ -269,17 +296,22 @@ resource "local_file" "setup_ssl" {
     fi
     echo "DNS OK: $APP_HOSTNAME -> $INSTANCE_IP"
 
-    echo "Provisioning Let's Encrypt certificate..."
-    aws lightsail ssh \
-      --instance-name "$INSTANCE_NAME" \
-      --region "$REGION" \
-      -- sudo /opt/bitnami/bncert-tool \
-           --domain "$APP_HOSTNAME" \
-           --email  "$SSL_EMAIL" \
-           --enable-https \
-           --enable-redirect \
-           --agree-tos
+    echo "Installing certbot and Apache plugin..."
+    sudo dnf install -y certbot python3-certbot-apache
+
+    echo "Provisioning Let's Encrypt certificate for $APP_HOSTNAME..."
+    sudo certbot --apache \
+      --domain "$APP_HOSTNAME" \
+      --email  "$SSL_EMAIL" \
+      --agree-tos \
+      --non-interactive \
+      --redirect
+
+    echo "Verifying auto-renewal timer is active..."
+    sudo systemctl enable --now certbot-renew.timer
+    sudo systemctl status certbot-renew.timer --no-pager
 
     echo "SSL provisioning complete. Visit https://$APP_HOSTNAME"
     BASH
 }
+
