@@ -11,10 +11,10 @@
 #   username  - IAM username to create (e.g. jsmith)
 #   group     - IAM group to add the user to (e.g. ewx-developers)
 #   app-name  - Short app name used to scope ECR repo and CodeBuild
-#               project names (e.g. flyspray, myapp, tracker)
+#               project names (e.g. myapp, tracker)
 #
 # Examples:
-#   ./setup-lightsail-container-user.sh jsmith ewx-developers flyspray
+#   ./setup-lightsail-container-user.sh jsmith ewx-developers stupdendousapp
 #   ./setup-lightsail-container-user.sh alee research-team myapp
 #
 # Run in AWS CloudShell - account ID is resolved automatically.
