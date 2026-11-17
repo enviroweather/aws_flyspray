@@ -37,6 +37,21 @@ output "flyspray_conf_path" {
   value       = "${path.module}/output/flyspray.conf.php"
 }
 
+output "region" {
+  description = "AWS region deployed to."
+  value       = var.region
+}
+
+output "s3_bucket" {
+  description = "S3 bucket containing the SQL dump."
+  value       = var.s3_bucket
+}
+
+output "s3_dump_key" {
+  description = "S3 object key for the SQL dump."
+  value       = var.s3_dump_key
+}
+
 output "setup_ssl_path" {
   description = "Local path to the generated setup_ssl.sh."
   value       = "${path.module}/output/setup_ssl.sh"
