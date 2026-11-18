@@ -30,15 +30,22 @@ docker compose -f docker-compose.dev.yml up --build
    - User: `flyspray_user`, Password: `dev-only-password`
    - Table prefix: `flyspray_`
 
-   If the installer reports Flyspray is already configured (because
-   `configure.php` already generated a config at container startup), delete it
-   first and reload the page:
+   The installer always reports Flyspray is already configured (because
+   `configure.php` already generated a config at container startup). To delete it:
 
    ```bash
    docker compose -f docker-compose.dev.yml exec app rm -f /var/www/html/flyspray.conf.php
    ```
+   then reload.  It's a to-do item to do this inside the dockerfile. 
 
-2. After the installer finishes, restart the `app` container so
+2. after the system is installed or 'setup' the system requires you to delete the 'setup' folder
+   do this with 
+   ```
+   docker compose -f docker-compose.dev.yml exec app rm -rf /var/www/html/setup
+   ```
+
+
+3. After the installer finishes, restart the `app` container so
    `configure.php` regenerates `flyspray.conf.php` from the compose file's
    env vars (this is what production always does; it only sets the DB
    connection and a couple of general settings, so it doesn't undo the
