@@ -1,136 +1,48 @@
 #!/usr/bin/env bash
-# =============================================================================
-# scripts/import_db.sh
-# Procedural post-Terraform step: downloads the SQL dump from S3,
-# creates the app DB and user, imports the dump, and grants permissions.
-#
-# Run from the terraform/ directory after 'terraform apply' completes:
-#   cd terraform/
-#   ./scripts/import_db.sh
-#
-# Secrets are read from the same TF_VAR_* env vars used by Terraform.
-# =============================================================================
 set -euo pipefail
 
-log() { echo "[$(date '+%H:%M:%S')] $*"; }
-err() { echo "[ERROR] $*" >&2; exit 1; }
+for executable in terraform aws psql; do
+  command -v "$executable" >/dev/null || { echo "Missing required command: $executable" >&2; exit 1; }
+done
+: "${TF_VAR_db_master_password:?Set TF_VAR_db_master_password}"
+: "${TF_VAR_app_password:?Set TF_VAR_app_password}"
 
-# Ensure psql is in PATH (common Homebrew libpq location on macOS)
-if ! command -v psql &>/dev/null; then
-  if [[ -x "/opt/homebrew/opt/libpq/bin/psql" ]]; then
-    export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
-  elif [[ -x "/usr/local/opt/libpq/bin/psql" ]]; then
-    export PATH="/usr/local/opt/libpq/bin:$PATH"
-  fi
+db_host="${PGHOST:-$(terraform output -raw db_endpoint)}"
+db_port="${PGPORT:-$(terraform output -raw db_port)}"
+app_db="$(terraform output -raw app_db)"
+app_user="$(terraform output -raw app_user)"
+bucket="$(terraform output -raw s3_bucket)"
+key="$(terraform output -raw s3_dump_key)"
+region="$(terraform output -raw region)"
+[[ -n "$bucket" && -n "$key" ]] || { echo "Configure s3_bucket and s3_dump_key." >&2; exit 1; }
+
+temp_dir=$(mktemp -d)
+trap 'rm -rf "$temp_dir"' EXIT
+chmod 700 "$temp_dir"
+aws s3 cp "s3://$bucket/$key" "$temp_dir/dump.sql" --region "$region"
+
+export PGPASSWORD="$TF_VAR_db_master_password" PGHOST="$db_host" PGPORT="$db_port" PGUSER=dbmaster
+psql -X -v ON_ERROR_STOP=1 -v app_user="$app_user" -v app_db="$app_db" -d postgres <<'SQL'
+\getenv app_password TF_VAR_app_password
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user') \gexec
+SELECT format('CREATE DATABASE %I OWNER %I', :'app_db', :'app_user')
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'app_db') \gexec
+SQL
+
+table_count=$(psql -X -At -v ON_ERROR_STOP=1 -d "$app_db" -c "SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');")
+if [[ "$table_count" != "0" ]]; then
+  echo "Refusing to import into a database with existing public tables." >&2
+  exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Read all values from Terraform outputs — no config duplication
-# ---------------------------------------------------------------------------
-log "Reading Terraform outputs..."
-DB_ENDPOINT=$(terraform output -raw db_endpoint)
-DB_PORT=$(terraform output -raw db_port)
-INSTANCE_NAME=$(terraform output -raw instance_name)
-DB_INSTANCE_NAME=$(terraform output -raw db_instance_name 2>/dev/null || echo "${TF_VAR_db_instance_name:-ewx-flyspray-db}")
-
-REGION=$(terraform output -raw region 2>/dev/null || aws configure get region 2>/dev/null || echo "us-east-2")
-
-# Non-secret vars — read from Terraform outputs or fall back to env vars
-S3_BUCKET=$(terraform output -raw s3_bucket 2>/dev/null || echo "${TF_VAR_s3_bucket:-}")
-S3_DUMP_KEY=$(terraform output -raw s3_dump_key 2>/dev/null || echo "${TF_VAR_s3_dump_key:-}")
-APP_DB="${TF_VAR_app_db:-flyspray}"
-APP_USER="${TF_VAR_app_user:-flyspray_user}"
-DB_MASTER_USER="dbmaster"
-LOCAL_DUMP="/tmp/flyspray_dump.sql"
-
-# Secrets — must already be exported (same session as terraform apply)
-DB_MASTER_PASSWORD="${TF_VAR_db_master_password:-}"
-APP_PASSWORD="${TF_VAR_app_password:-}"
-[[ -z "$DB_MASTER_PASSWORD" ]] && err "Set TF_VAR_db_master_password before running."
-[[ -z "$APP_PASSWORD" ]]       && err "Set TF_VAR_app_password before running."
-
-log "DB endpoint     : $DB_ENDPOINT:$DB_PORT"
-log "App DB / user   : $APP_DB / $APP_USER"
-log "S3 source       : s3://$S3_BUCKET/$S3_DUMP_KEY"
-
-# ---------------------------------------------------------------------------
-# Enable public DB access temporarily for the import
-# ---------------------------------------------------------------------------
-log "Enabling public endpoint on DB..."
-aws lightsail update-relational-database \
-  --relational-database-name "$DB_INSTANCE_NAME" \
-  --publicly-accessible \
-  --region "$REGION" --output text > /dev/null
-
-log "Waiting for DB to become available..."
-while true; do
-  STATE=$(aws lightsail get-relational-database \
-    --relational-database-name "$DB_INSTANCE_NAME" \
-    --region "$REGION" \
-    --query 'relationalDatabase.state' \
-    --output text 2>/dev/null || echo "pending")
-  [[ "$STATE" == "available" ]] && break
-  log "  DB state: $STATE — waiting..."
-  sleep 20
-done
-
-# ---------------------------------------------------------------------------
-# Download dump from S3
-# ---------------------------------------------------------------------------
-log "Downloading dump from s3://$S3_BUCKET/$S3_DUMP_KEY"
-aws s3 cp "s3://$S3_BUCKET/$S3_DUMP_KEY" "$LOCAL_DUMP" --region "$REGION"
-
-# ---------------------------------------------------------------------------
-# Create app DB, user, import dump, grant permissions
-# ---------------------------------------------------------------------------
-export PGPASSWORD="$DB_MASTER_PASSWORD"
-
-log "Granting public schema privileges (PG15+)..."
-psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d postgres <<SQL
-GRANT ALL ON SCHEMA public TO "$DB_MASTER_USER";
+psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$temp_dir/dump.sql"
+psql -X -v ON_ERROR_STOP=1 -v app_user="$app_user" -d "$app_db" <<'SQL'
+SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_user') \gexec
+SELECT format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', :'app_user') \gexec
+SELECT format('GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO %I', :'app_user') \gexec
+SELECT format('GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO %I', :'app_user') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO %I', :'app_user') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO %I', :'app_user') \gexec
 SQL
-
-log "Creating app database '$APP_DB' and user '$APP_USER'..."
-psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d postgres <<SQL
-SELECT 'CREATE DATABASE $APP_DB'
-  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$APP_DB')\gexec
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$APP_USER') THEN
-    CREATE ROLE "$APP_USER" LOGIN PASSWORD '$APP_PASSWORD';
-  END IF;
-END
-\$\$;
-SQL
-
-log "Granting schema privileges on app database..."
-psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$APP_DB" <<SQL
-GRANT ALL ON SCHEMA public TO "$DB_MASTER_USER";
-GRANT USAGE, CREATE ON SCHEMA public TO "$APP_USER";
-SQL
-
-log "Importing SQL dump into '$APP_DB'..."
-psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$APP_DB" \
-  --single-transaction -v ON_ERROR_STOP=0 -f "$LOCAL_DUMP"
-
-log "Granting app user access to all imported tables..."
-psql -h "$DB_ENDPOINT" -p "$DB_PORT" -U "$DB_MASTER_USER" -d "$APP_DB" <<SQL
-GRANT ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public TO "$APP_USER";
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "$APP_USER";
-GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO "$APP_USER";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO "$APP_USER";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "$APP_USER";
-SQL
-
-unset PGPASSWORD
-
-# ---------------------------------------------------------------------------
-# Disable public DB access
-# ---------------------------------------------------------------------------
-log "Disabling public endpoint on DB..."
-aws lightsail update-relational-database \
-  --relational-database-name "$DB_INSTANCE_NAME" \
-  --no-publicly-accessible \
-  --region "$REGION" --output text > /dev/null
-
-log "DB import complete. Run output/setup_ssl.sh after DNS propagates."
+echo "Database import complete. Verify the app user's password if the role already existed."

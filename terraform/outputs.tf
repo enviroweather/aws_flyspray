@@ -1,14 +1,30 @@
-# =============================================================================
-# outputs.tf
-# =============================================================================
+output "container_service_name" {
+  description = "Name of the Lightsail container service."
+  value       = aws_lightsail_container_service.flyspray.name
+}
 
-output "instance_name" {
-  description = "Lightsail instance name."
-  value       = aws_lightsail_instance.flyspray.name
+output "container_url" {
+  description = "Service URL; use its hostname as the custom-domain CNAME target."
+  value       = aws_lightsail_container_service.flyspray.url
+}
+
+output "certificate_validation_records" {
+  description = "DNS records required to validate the Lightsail certificate."
+  value       = aws_lightsail_certificate.flyspray.domain_validation_options
+}
+
+output "ecr_repository_url" {
+  description = "ECR repository CodeBuild publishes the Flyspray image to."
+  value       = aws_ecr_repository.flyspray.repository_url
+}
+
+output "codebuild_project_name" {
+  description = "CodeBuild project name; trigger a build with `aws codebuild start-build`."
+  value       = aws_codebuild_project.flyspray.name
 }
 
 output "static_ip" {
-  description = "Static IPv4 address. Use this for your GoDaddy A record."
+  description = "Retained legacy instance IP; container services cannot use it."
   value       = aws_lightsail_static_ip.flyspray.ip_address
 }
 
@@ -27,14 +43,14 @@ output "db_port" {
   value       = aws_lightsail_database.flyspray.master_endpoint_port
 }
 
-output "app_url" {
-  description = "Flyspray URL (live after DNS + SSL are configured)."
-  value       = "https://${var.app_hostname}"
+output "app_db" {
+  description = "Flyspray database name."
+  value       = var.app_db
 }
 
-output "flyspray_conf_path" {
-  description = "Local path to the generated backup flyspray.conf.php."
-  value       = "${path.module}/output/flyspray.conf.php"
+output "app_user" {
+  description = "Flyspray database user."
+  value       = var.app_user
 }
 
 output "region" {
@@ -50,40 +66,4 @@ output "s3_bucket" {
 output "s3_dump_key" {
   description = "S3 object key for the SQL dump."
   value       = var.s3_dump_key
-}
-
-output "setup_ssl_path" {
-  description = "Local path to the generated setup_ssl.sh."
-  value       = "${path.module}/output/setup_ssl.sh"
-}
-
-output "next_steps" {
-  description = "Post-apply checklist."
-  value       = <<-EOT
-
-    ---- NEXT STEPS (in order) ----
-
-    Note: Flyspray and flyspray.conf.php are automatically installed and
-    configured on the Lightsail instance on first boot via user_data.
-
-    1. Create GoDaddy DNS A record:
-         Name:  ${split(".", var.app_hostname)[0]}
-         Value: ${aws_lightsail_static_ip.flyspray.ip_address}
-         TTL:   600
-
-    2. Run the DB import (loads dump from S3 into managed PostgreSQL):
-         cd terraform/
-         ./scripts/import_db.sh
-
-    3. Wait for DNS propagation:
-         dig +short ${var.app_hostname}   # should return ${aws_lightsail_static_ip.flyspray.ip_address}
-
-    4. Provision SSL (Let's Encrypt):
-         output/setup_ssl.sh
-
-    5. Open https://${var.app_hostname}
-
-    To tear everything down:
-         terraform destroy
-  EOT
 }

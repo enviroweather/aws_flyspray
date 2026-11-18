@@ -1,315 +1,250 @@
-# Flyspray on AWS Lightsail with PostgreSQL
+# Flyspray on Lightsail Containers
 
-This repository contains the [Terraform](https://www.terraform.io/) configuration and automation scripts to deploy [Flyspray](https://www.flyspray.org/), a lightweight web-based bug and issue tracking system written in PHP, to **AWS Lightsail** backed by a **managed PostgreSQL database**.
+Terraform manages a long-lived Lightsail container service, a Lightsail TLS
+certificate, and a private Lightsail PostgreSQL database. The container runs
+Flyspray with PHP and Apache. Lightsail operates the hosts; you still need to
+rebuild, update, and scan the application and image regularly.
 
----
+**This is a migration starting point, not yet a production-ready replacement.**
+The image intentionally disables uploads and does not provide durable storage
+for attachments or avatars. Existing files are not included. Containers and
+their writable files can disappear at any restart or deployment. Preserve and
+restore these separately, and implement/test durable storage before migrating
+an installation that needs them. Sessions and cache are also ephemeral; use a
+single node and expect sessions to be lost on redeployment. The static health
+check tests Apache, not database or application health.
 
-## Architecture Overview
+## DNS and lifecycle
 
-```
-                        +----------------------------+
-                        |   Internet / Web Browser   |
-                        +--------------+-------------+
-                                       |
-                              HTTPS (Port 443)
-                                       v
-                    +-------------------------------------+
-                    |     Lightsail Static IPv4           |
-                    |   (flyspray.yourdomain.com)         |
-                    +------------------+------------------+
-                                       |
-+--------------------------------------v--------------------------------------+
-| AWS Lightsail Instance (LAMP PHP 8 Bitnami)                                 |
-|                                                                             |
-|  - OS: Debian-based Bitnami Linux (micro_3_0: 1 GB RAM, 40 GB SSD, ~$7/mo)  |
-|  - Apache 2.4 serving Flyspray on root (/)                                  |
-|  - PHP 8.x with pdo_pgsql & pgsql extensions enabled                        |
-|  - Automatic first-boot provisioning via user_data (cloud-init):            |
-|      * Downloads Flyspray release tarball                                   |
-|      * Configures Apache & sets bitnami:daemon permissions                  |
-|      * Injects flyspray.conf.php with database credentials                  |
-|  - Let's Encrypt SSL via Bitnami bncert-tool (auto HTTP -> HTTPS redirect)  |
-|  - Daily automatic instance snapshot (02:00 UTC, 7-day retention)          |
-+--------------------------------------+--------------------------------------+
-                                       | Private Lightsail VPC
-                             PostgreSQL (Port 5432)
-                                       v
-+-----------------------------------------------------------------------------+
-| AWS Lightsail Managed Database                                              |
-|                                                                             |
-|  - Engine: PostgreSQL 16 (micro_2_0: 1 GB RAM, 40 GB SSD, ~$15/mo)         |
-|  - Private access only (public access temporarily opened during DB import)   |
-|  - Automated daily backups (window: 03:00–03:30 UTC, 7-day retention)        |
-+-----------------------------------------------------------------------------+
-```
+Lightsail static IPs attach to instances, not container services. The existing
+IP is retained in Terraform, but cannot direct traffic to the container. A
+one-time GoDaddy change from the old A record to a CNAME is necessary, in
+addition to a certificate-validation CNAME. The service's generated hostname
+stays the same across image deployments and capacity changes **while that
+service exists**. Deleting and recreating the service gives it a new hostname,
+requiring another DNS change. Ordinary retries should redeploy an image, not
+destroy the service.
 
-### Component Details
-* **Lightsail Instance (`lamp_8_bitnami`)**: Runs the web application. Using Lightsail instead of standard EC2 provides predictable monthly billing, bundled egress bandwidth, and simplified firewall management.
-* **Managed PostgreSQL 16 Database**: Relational database service managed by Lightsail with automatic daily backups and point-in-time restore capability.
-* **Static IP**: Fixed public IPv4 allocated once and bound to the instance, ensuring reboots or instance replacement won't break DNS records.
-* **Automated Bootstrapping (`user_data`)**: The instance self-installs Flyspray and configures Apache/PHP on first boot, eliminating manual SSH/tarball extraction.
-* **Separation of Concerns**: Infrastructure state is fully managed by Terraform, while one-time data migration (SQL dump import) and interactive SSL certification are handled by clean, companion bash scripts.
+The service, database, and legacy static IP have `prevent_destroy` guards.
+Consequently `terraform destroy` will fail while these resources remain in the
+configuration. The service is billable even when disabled or without a
+deployment; the retained unattached static IP may also incur charges. Check
+current prices with `aws lightsail get-container-service-powers --region REGION`
+and the Lightsail pricing page.
 
----
+## Security
+
+Passwords and the base64-encoded Flyspray configuration are stored in
+Terraform state and plan files and in the Lightsail deployment environment.
+Base64 is not encryption, and `sensitive` only hides normal Terraform output.
+Anyone allowed to read Lightsail deployments can read these values. Restrict
+IAM and access to state, plans, shell environments, backups, and logs; use an
+encrypted, versioned, locked remote backend for production. The existing local
+backend is retained to avoid an implicit state migration. See
+[Terraform's S3 backend documentation](https://developer.hashicorp.com/terraform/language/backend/s3)
+and migrate state separately after backing it up. Do not print full deployment
+specifications or commit credentials. Ensure the private database and container
+are in the same Lightsail account and region, and verify connectivity.
 
 ## Prerequisites
 
-1. **AWS Account & CLI**:
-   * An active AWS account with permissions to manage Lightsail and S3.
-   * grant access to Lightsail for AWS account
-   * Generate AWS credentials in IAM console,and configured locally (`aws configure`).
-   
-2. **Workstation Tools**:
-   * **Terraform** (or OpenTofu): `brew install hashicorp/tap/terraform`
-   * **AWS CLI v2**: `brew install awscli`
-   * **PostgreSQL Client (`psql`)**: `brew install libpq`
-3. **Database Dump**:
-   * An existing Flyspray PostgreSQL SQL dump file stored in an S3 bucket (e.g. `s3://your-bucket/flyspray_dump.sql`).
-4. **Domain / DNS**:
-   * A subdomain (e.g. `flyspray.enviroweather.net`) managed via your DNS registrar (GoDaddy, Route53, etc.).
+- Terraform 1.5 or later, the locked AWS provider 5.x, and AWS CLI v2. **No
+  local Docker install is required** — images are built by AWS CodeBuild on an
+  AWS-managed x86_64 host, so an Apple Silicon (or any ARM) workstation never
+  has to cross-compile, and colleagues don't need Docker installed at all.
+- AWS credentials with permissions for Lightsail, ECR, CodeBuild, S3, and IAM
+  (to create the CodeBuild service role). Terraform provisions the ECR repo,
+  the S3 bucket CodeBuild reads its source from, the CodeBuild project, and an
+  ECR repository policy that lets the Lightsail service pull images directly
+  (no `lightsailctl`/`push-container-image` step).
+- Terraform provisions the managed Lightsail PostgreSQL *server* itself
+  (`aws_lightsail_database.flyspray` in [terraform/main.tf](terraform/main.tf))
+  — there's nothing to pre-provision there. What this workflow assumes you
+  already have is the **existing Flyspray application data**: a SQL dump of
+  the current database, because
+  [terraform/scripts/import_db.sh](terraform/scripts/import_db.sh) creates the
+  `app_db`/`app_user` role and database and imports that dump, rather than
+  running Flyspray's own schema installer (the image removes
+  `/var/www/html/setup` for security). See [Database import](#database-import).
+  A brand-new, schema-less Flyspray install (no prior data to migrate) is not
+  yet supported by this image.
+- Flyspray itself has no native environment-variable support (verified against
+  upstream source): [container/configure.php](container/configure.php) runs
+  once at container startup and writes `flyspray.conf.php` from plain
+  environment variables (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS`,
+  `DB_PREFIX`, `COOKIE_SALT`, `APP_BASE_URL`, `SYNTAX_PLUGIN`) that Terraform
+  sets directly on the Lightsail deployment from `.env`/`TF_VAR_*` values — no
+  secret is baked into the image, and no base64-encoded config blob is needed.
+  If migrating an existing install, reuse its `dbprefix` and `cookiesalt`
+  values so existing data and sessions remain valid.
+- A Flyspray release compatible with the existing database schema and PHP.
+  The Dockerfile defaults to upstream `1.0-rc11`. Check compatibility and
+  upgrades before cutover. Choose another release by setting `flyspray_version`
+  in Terraform. An upgrade may require a separate Flyspray upgrade procedure;
+  the image removes the public setup directory and does not run schema
+  upgrades.
 
----
+## Migration
 
-## Repository Structure
+Run Terraform commands from `terraform/`. Do not run a normal full apply until
+the container has been verified and you are ready to remove the old VM. These
+steps intentionally use targeted plans during the transition; targeting is an
+exception, so inspect each plan and run a full plan at the end.
 
-```
-aws_flyspray/
-├── README.md
-├── upload_dump_to_s3.sh  # Pre-Terraform: creates S3 bucket, uploads SQL dump, updates tfvars
-├── terraform/
-│   ├── main.tf           # Lightsail instance, DB, static IP, firewall, user_data
-│   ├── variables.tf      # Input variables and validation rules
-│   ├── outputs.tf        # Static IP, DB endpoints, and post-apply guide
-│   ├── terraform.tfvars  # Non-secret configuration (domain, email, region, bundles)
-│   ├── scripts/
-│   │   ├── import_db.sh  # Downloads S3 dump, configures DB user/schema, loads data
-│   │   └── upload_dump_to_s3.sh -> ../../upload_dump_to_s3.sh
-│   └── output/           # (Generated after apply)
-│       ├── flyspray.conf.php  # Local backup copy of application config
-│       └── setup_ssl.sh       # Let's Encrypt certificate provisioning script
-```
+1. Back up the database, the existing Flyspray configuration, attachments,
+   avatars, and Terraform state to a protected location. Verify the backups can
+   be restored. Record the current A record, static IP, region, account, and
+   VM details. Avoid concurrent state operations. Do not import a dump into an
+   existing database merely to move compute: the container can use the current
+   private database and application user.
 
----
+2. Review the existing `terraform.tfvars`, especially region, `instance_name`,
+   database settings, app user, and hostname. Keep the existing instance name
+   so the legacy IP name does not change. For a new environment start from
+   [terraform/terraform.tfvars.example.txt](terraform/terraform.tfvars.example.txt).
+   Leave `deploy_flyspray` at its default `false` and `enable_custom_domain`
+   false for the initial stage. Export `TF_VAR_db_master_password`,
+   `TF_VAR_app_password`, and `TF_VAR_cookie_salt` from a secure source (e.g.
+   `.env`), without shell history. The application password must match the
+   existing database role; Terraform does not change that role.
 
-## Deployment Workflow
+3. Initialize and create the service, certificate, ECR repository, and
+   CodeBuild project. Review the saved plan before applying it. If Terraform
+   proposes an unexpected deletion or replacement, stop. The initial service
+   has no application deployment and still incurs charges.
 
-Always run Terraform from your **local machine / laptop** rather than ephemeral cloud shells, ensuring your `terraform.tfstate` file is safely persisted on disk.
+   ```bash
+   cd terraform
+   terraform init
+   terraform plan -target=aws_lightsail_container_service.flyspray \
+     -target=aws_lightsail_certificate.flyspray \
+     -target=aws_codebuild_project.flyspray -out=service.tfplan
+   terraform show service.tfplan
+   terraform apply service.tfplan
+   terraform output container_url
+   terraform output certificate_validation_records
+   ```
 
-### Step 0: get a working IAM user
+4. Add the certificate validation record shown in the output at GoDaddy. Leave
+   the existing traffic A record in place for now. Wait until the Lightsail
+   certificate status is `ISSUED`, checking in the Lightsail console or with:
 
-At our institution you can't use SSO, you have to create an IAM user.  See
-online how to do that and to create CLI credentials.  If you have a better
-way then GFI but here this is what we do. 
+   ```bash
+   aws lightsail get-certificates --region "$(terraform output -raw region)" \
+     --query 'certificates[].{name:certificateName,status:certificateDetail.status}'
+   ```
 
-after creating the user, you need to grant that user permissions.  This is possible
-in the cloudshell of your SSO account in the console.  
+   Keep the validation CNAME for renewal. GoDaddy may append the zone name to a
+   record's host field; avoid entering the domain twice.
 
-since the users on in your computer's CLI have limited permissions, you have
-to run this in the cloudshell with your log-in user
+5. Trigger CodeBuild to build and push the image. This runs entirely in AWS
+   on an x86_64 host — no Docker or `lightsailctl` is installed or used
+   locally, so any colleague with Terraform and AWS CLI access can run it.
 
+   ```bash
+   bash scripts/start_build.sh
+   ```
 
-```bash
-export FLYSPRAY_IAM_USER=<user you created above>
-aws iam put-user-policy \
-  --user-name $FLYSPRAY_IAM_USER \
-  --policy-name LightsailFullAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      {
-        "Effect": "Allow",
-        "Action": "lightsail:*",
-        "Resource": "*"
-      }
-    ]
-  }'
+   To build a different compatible Flyspray release, set `flyspray_version`
+   in Terraform first (it's passed to CodeBuild as a build argument) and
+   re-apply the CodeBuild project before re-running the script.
 
-```
+6. Prepare the deployment. Set `deploy_flyspray` to `true` (`cookie_salt` must
+   already be exported, per step 2). Terraform resolves the current digest for
+   `image_tag` (default `latest`) via a data source, so re-running this same
+   plan after any future CodeBuild push automatically picks up the new image
+   — no image tag or reference needs to be copied by hand. The deployment's
+   `DB_PREFIX` defaults to `flyspray_`; override it in tfvars if the existing
+   database uses a different prefix. The target keeps the old VM in place;
+   review the plan for database replacement or other changes.
 
-Check the permissions are there
+   ```bash
+   export TF_VAR_deploy_flyspray=true
+   export TF_VAR_enable_custom_domain=true
+   terraform plan -target=aws_lightsail_container_service_deployment_version.flyspray \
+     -out=deployment.tfplan
+   terraform show deployment.tfplan
+   terraform apply deployment.tfplan
+   ```
 
-```bash
-aws iam list-user-policies --user-name $FLYSPRAY_IAM_USER
-```
+   Passwords, the cookie salt, and the saved plan are sensitive. Terraform may
+   show changes involving secrets in plans and state; handle both accordingly.
+   Check status and logs without printing deployment environment values:
 
-It should say 
+   ```bash
+   aws lightsail get-container-service-deployments --region "$(terraform output -raw region)" \
+     --service-name "$(terraform output -raw container_service_name)" \
+     --query 'deployments[].{version:version,state:state}'
+   aws lightsail get-container-log --region "$(terraform output -raw region)" \
+     --service-name "$(terraform output -raw container_service_name)" --container-name flyspray
+   ```
 
-```JSON
-{
-    "PolicyNames": [
-        "LightsailFullAccess"
-    ]
-}
-```
+7. Once the deployment is active and the certificate is attached, replace the
+   GoDaddy A record for the app hostname with a CNAME to the **hostname** in
+   `terraform output -raw container_url` (no `https://` or trailing path). DNS
+   changes take time. Verify HTTPS, login, database access, links, and the
+   limitations on files and sessions. The default service URL is useful for
+   the static `/health.txt` check; the application forces the custom hostname.
 
-### Step 1: Upload Your Database Dump to S3
+8. Only after verifying the cutover and backups, run an untargeted plan. It
+   should propose removing the old VM, attachment, firewall, snapshot helper,
+   and generated VM files. It must not replace or destroy the database, static
+   IP, or service. Review and approve the saved plan before applying:
 
-Run the pre-Terraform script pointing to your local SQL dump:
+   ```bash
+   terraform plan -out=cutover.tfplan
+   terraform show cutover.tfplan
+   terraform apply cutover.tfplan
+   ```
 
-```bash
-./upload_dump_to_s3.sh /path/to/your/flyspray_dump.sql
-```
-*(Or run without arguments to be prompted interactively).*
+   Delete old sensitive plan files securely according to your organization's
+   process. Do not run the old `output/setup_ssl.sh`; Lightsail handles TLS.
 
-* **What happens**:
-  1. Detects your AWS region (from `aws configure`, defaulting to `us-east-2`).
-  2. Creates a private, encrypted S3 bucket (`flyspray-db-dump-<account_id>-<region>`) with Public Access Block enabled.
-  3. Uploads your SQL dump file to S3.
-  4. Automatically updates `terraform/terraform.tfvars` with:
-     * `region = "<region>"`
-     * `s3_bucket = "<bucket-name>"`
-     * `s3_dump_key = "<filename.sql>"`
+## Rollback and recovery
 
-### Step 2: Review Configuration
+Before removing the VM, rollback means restoring the original GoDaddy A record
+to the retained static IP and leaving the old instance attached. DNS propagation
+can delay rollback. After the VM is removed, an IP alone cannot serve traffic:
+restore an instance from a verified snapshot or backup and attach the IP, then
+restore DNS. A rollback of a container image can re-tag a previously pushed ECR
+image as `image_tag` (or add a dedicated `image_tag` variable value pinned to
+an older digest) and apply a reviewed Terraform plan. Protect database and
+file backups independently of the VM and container service.
 
-Inspect `terraform/terraform.tfvars` to verify your domain and email settings:
-```hcl
-region          = "us-east-2"
-instance_name   = "flyspray-app"
-instance_bundle = "micro_3_0"       # $7/month
+To intentionally remove protected resources, first take and verify backups,
+review current state and billing, explicitly remove the relevant lifecycle
+guard in configuration, then run `terraform plan -destroy` and inspect every
+resource before approving `terraform destroy`. Destroying the service changes
+the hostname on recreation; destroying the IP releases it. The database is
+configured to skip a final snapshot, so create and verify one separately before
+any intentional database deletion.
 
-app_hostname    = "flyspray.enviroweather.net"
-ssl_email       = "your-email@example.com"
+## Database import
 
-db_instance_name = "ewx-flyspray-db"
-db_bundle        = "micro_2_0"      # $15/month
-app_db           = "flyspray"
-app_user         = "flyspray_user"
+The existing database does not need reimporting during a compute-only migration.
+For a **new, empty** database, [terraform/scripts/import_db.sh](terraform/scripts/import_db.sh)
+imports a plain SQL dump from the configured S3 location. It refuses to import
+if public tables already exist and stops on SQL errors. It requires `psql`,
+AWS CLI, exported password variables, and network access to the private DB.
+It never changes public accessibility. Run on a trusted host with private
+network connectivity, or establish an SSH tunnel through an appropriately
+secured existing host and set `PGHOST` and `PGPORT`. Restrict access to temporary
+files and verify the imported schema, credentials, and permissions afterwards.
+The script does not reset the password of an existing role. Custom-format dumps
+require a separately planned `pg_restore` workflow.
 
-# Populated automatically by upload_dump_to_s3.sh:
-s3_bucket   = "flyspray-db-dump-123456789012-us-east-2"
-s3_dump_key = "flyspray_dump.sql"
-```
+To upload a plain SQL dump to an existing private bucket, run from the project
+root `bash upload_dump_to_s3.sh /secure/path/dump.sql BUCKET KEY`, then set
+`s3_bucket` and `s3_dump_key` in Terraform and apply a reviewed plan. The
+upload overwrites an existing object with the same key; use a unique key or
+bucket versioning. Restrict access to the bucket and its backups.
 
-### Step 3: Set Passwords in Your Shell
+## Files
 
-Export your database passwords as environment variables (never commit passwords to `.tfvars` files):
-
-*If using an .env file (recommended) - save this file in an external, safe location*
-```bash
-source .env
-```
-*alt - enter directly in shell, no history*
-```bash
-read -s -p "DB master password: " TF_VAR_db_master_password && export TF_VAR_db_master_password
-read -s -p "App password: "       TF_VAR_app_password       && export TF_VAR_app_password
-```
-
-*alt - type them in the CLI, not recommend as they will be in your history file*
-```bash 
-export TF_VAR_db_master_password="YourSecureMasterPassword"
-export TF_VAR_app_password="YourSecureAppPassword"
-```
-
-### Step 4: Initialize and Apply Terraform
-
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-* **What happens**: Terraform provisions the PostgreSQL database, allocates the static IP, launches the LAMP instance, and runs the `user_data` script to download and install Flyspray.
-* *Note: Lightsail databases typically take 8–12 minutes to reach the `available` state.*
-* When finished, Terraform outputs your **Static IP** and post-apply checklist.
-
-### Step 5: Configure DNS
-
-Log into your DNS provider (e.g., GoDaddy) and add an **A record**:
-* **Host / Name**: `flyspray` (or your subdomain prefix)
-* **Value / Points to**: `<STATIC_IP>` (from `terraform output static_ip`)
-* **TTL**: 600 (10 minutes)
-
-### Step 6: Import the PostgreSQL Dump
-
-Run the import script:
-```bash
-./scripts/import_db.sh
-```
-
-* **What happens**:
-  1. Temporarily enables public accessibility on the managed database.
-  2. Downloads the SQL dump file from S3 (`/tmp/flyspray_dump.sql`).
-  3. Connects via `psql` to grant necessary public schema privileges (PostgreSQL 15+ compatible), creates the application user and database, and imports the SQL dump.
-  4. Grants all privileges on imported tables, sequences, and functions to the application user.
-  5. Disables public accessibility on the database for security.
-
-### Step 7: Provision SSL Certificate
-
-Once DNS has propagated (verify with `dig +short flyspray.yourdomain.com` returning your static IP):
-```bash
-output/setup_ssl.sh
-```
-
-This runs Bitnami's `bncert-tool` over SSH on the instance to obtain a Let's Encrypt certificate and configure automatic HTTP-to-HTTPS redirection.
-
-### Step 8: Open in Browser
-
-Visit `https://flyspray.yourdomain.com` — Flyspray is live and connected to your imported database!
-
----
-
-## Terraform Operations & Troubleshooting
-
-### Resuming / Converging State
-Terraform is declarative and idempotent. If a network blip or timeout occurs at any point:
-```bash
-terraform apply
-```
-Terraform compares the AWS state with your code and resumes only what remains to be created.
-
-### Replacing / Rebuilding a Single Component
-If the application instance ever gets into a bad state and you want to recreate **only the web server** without touching the database or static IP:
-```bash
-terraform apply -replace="aws_lightsail_instance.flyspray"
-```
-
-### Checking Instance Bootstrap Logs
-If you need to verify the automated Flyspray installation on the instance:
-```bash
-aws lightsail ssh --instance-name flyspray-app --region us-east-1
-cat /var/log/flyspray-setup.log
-```
-
-### Teardown / Destroy
-To permanently delete all resources and stop all AWS charges:
-```bash
-terraform destroy
-```
-
----
-
-## Snapshot & Disaster Recovery Reference
-
-### Automatic Snapshots
-* **Instance**: Daily at `02:00 UTC` (retained for 7 days).
-* **Database**: Daily automatic backup window `03:00–03:30 UTC` (retained for 7 days).
-
-### Restoring from a Snapshot (AWS CLI)
-
-#### 1. Restore an Instance from a Snapshot:
-```bash
-aws lightsail create-instances-from-snapshot \
-  --instance-snapshot-name "flyspray-app-snapshot-name" \
-  --instance-names "flyspray-app-restored" \
-  --region us-east-1 \
-  --availability-zone us-east-1a \
-  --bundle-id micro_3_0
-```
-Then re-attach the static IP to the restored instance:
-```bash
-aws lightsail attach-static-ip \
-  --static-ip-name flyspray-app-static-ip \
-  --instance-name flyspray-app-restored \
-  --region us-east-1
-```
-
-#### 2. Restore a Database from a Snapshot:
-```bash
-aws lightsail create-relational-database-from-snapshot \
-  --relational-database-snapshot-name "flyspray-db-snapshot-name" \
-  --relational-database-name "ewx-flyspray-db-restored" \
-  --availability-zone us-east-1a \
-  --region us-east-1
-```
+- [terraform/main.tf](terraform/main.tf): retained IP and managed database.
+- [terraform/container.tf](terraform/container.tf): service, certificate, and deployment.
+- [terraform/build.tf](terraform/build.tf): ECR repository, S3 build source, and CodeBuild project.
+- [terraform/scripts/start_build.sh](terraform/scripts/start_build.sh): triggers and waits on a CodeBuild run.
+- [container/Dockerfile](container/Dockerfile): PHP/Apache image.
+- [container/configure.php](container/configure.php): runtime configuration.
+- [notes-docker.md](notes-docker.md): historical AI proposal, not instructions.

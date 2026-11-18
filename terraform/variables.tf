@@ -1,8 +1,8 @@
 # =============================================================================
 # variables.tf
-# All inputs mirror the FLYSPRAY_* env vars from the shell script.
-# Secrets (db_master_password, app_password) have no default and must
-# be supplied via TF_VAR_* environment variables — never in tfvars files.
+# Secrets (db_master_password, app_password, cookie_salt) have no default and
+# must be supplied via TF_VAR_* environment variables, e.g. sourced from .env
+# — never in tfvars files.
 # =============================================================================
 
 variable "region" {
@@ -17,35 +17,20 @@ variable "environment" {
   default     = "prod"
 }
 
-# ---------------------------------------------------------------------------
-# Instance
-# ---------------------------------------------------------------------------
 variable "instance_name" {
-  description = "Lightsail instance name. Change for dev/test deployments."
+  description = "Legacy name kept only to preserve the protected static IP's resource name."
   type        = string
   default     = "flyspray-app"
 }
 
-variable "instance_bundle" {
-  description = "Lightsail instance bundle ID. See: aws lightsail get-bundles."
-  type        = string
-  default     = "micro_3_0"   # $7/mo — 1 GB RAM, 40 GB disk
-}
-
-variable "instance_snapshot_time" {
-  description = "UTC time for daily automatic instance snapshot (HH:MM)."
-  type        = string
-  default     = "02:00"
-}
-
 variable "flyspray_version" {
-  description = "Flyspray release version to install (e.g. 1.0)."
+  description = "Flyspray release tag that CodeBuild downloads and bakes into the image."
   type        = string
-  default     = "1.0"
+  default     = "1.0-rc11"
 }
 
 # ---------------------------------------------------------------------------
-# Hostname and SSL
+# Hostname
 # ---------------------------------------------------------------------------
 variable "app_hostname" {
   description = "Custom subdomain for Flyspray (e.g. flyspray.example.com). Required."
@@ -54,16 +39,6 @@ variable "app_hostname" {
   validation {
     condition     = length(var.app_hostname) > 0
     error_message = "app_hostname must not be empty."
-  }
-}
-
-variable "ssl_email" {
-  description = "Email for Let's Encrypt expiry notifications. Required."
-  type        = string
-
-  validation {
-    condition     = can(regex("^[^@]+@[^@]+\\.[^@]+$", var.ssl_email))
-    error_message = "ssl_email must be a valid email address."
   }
 }
 
@@ -79,7 +54,7 @@ variable "db_instance_name" {
 variable "db_bundle" {
   description = "Lightsail database bundle ID. See: aws lightsail get-relational-database-bundles."
   type        = string
-  default     = "micro_2_0"   # $15/mo — 1 GB RAM, 40 GB
+  default     = "micro_2_0" # $15/mo — 1 GB RAM, 40 GB
 }
 
 variable "db_backup_window" {
@@ -131,11 +106,11 @@ variable "app_password" {
 variable "s3_bucket" {
   description = "S3 bucket containing the Flyspray SQL dump."
   type        = string
-  default     = "ewx-flyspray-941061635635-us-east-1-an"
+  default     = ""
 }
 
 variable "s3_dump_key" {
   description = "S3 object key for the SQL dump file."
   type        = string
-  default     = "flyspray_22_10_2026.sql"
+  default     = ""
 }
