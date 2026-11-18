@@ -144,3 +144,9 @@ variable "build_ver" {
     error_message = "build_ver must be a UTC ISO 8601 timestamp, for example 2026-11-18T03:43:43Z."
   }
 }
+
+variable "include_setup" {
+  description = "Temporary emergency switch that retains Flyspray's setup/upgrade UI in a CodeBuild image. Must be false for normal production builds."
+  type        = bool
+  default     = false
+}

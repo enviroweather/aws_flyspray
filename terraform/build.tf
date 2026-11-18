@@ -137,7 +137,7 @@ locals {
           - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REPO_URI"
       build:
         commands:
-          - docker build --build-arg "FLYSPRAY_VERSION=$FLYSPRAY_VERSION" -t "$ECR_REPO_URI:$IMAGE_TAG" .
+          - docker build --build-arg "FLYSPRAY_VERSION=$FLYSPRAY_VERSION" --build-arg "INCLUDE_SETUP=$INCLUDE_SETUP" -t "$ECR_REPO_URI:$IMAGE_TAG" .
       post_build:
         commands:
           - docker push "$ECR_REPO_URI:$IMAGE_TAG"
@@ -177,6 +177,10 @@ resource "aws_codebuild_project" "flyspray" {
     environment_variable {
       name  = "FLYSPRAY_VERSION"
       value = var.flyspray_version
+    }
+    environment_variable {
+      name  = "INCLUDE_SETUP"
+      value = tostring(var.include_setup)
     }
   }
 
