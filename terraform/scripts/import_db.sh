@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for executable in terraform aws psql; do
+if [[ $# -ne 1 ]]; then
+  echo "Usage: bash scripts/import_db.sh /path/to/dump.sql" >&2
+  exit 2
+fi
+
+dump_file=$1
+[[ -f "$dump_file" ]] || { echo "SQL dump does not exist or is not a regular file: $dump_file" >&2; exit 1; }
+[[ -r "$dump_file" ]] || { echo "SQL dump is not readable: $dump_file" >&2; exit 1; }
+
+for executable in terraform psql; do
   command -v "$executable" >/dev/null || { echo "Missing required command: $executable" >&2; exit 1; }
 done
 : "${TF_VAR_db_master_password:?Set TF_VAR_db_master_password}"
@@ -11,15 +20,6 @@ db_host="${PGHOST:-$(terraform output -raw db_endpoint)}"
 db_port="${PGPORT:-$(terraform output -raw db_port)}"
 app_db="$(terraform output -raw app_db)"
 app_user="$(terraform output -raw app_user)"
-bucket="$(terraform output -raw s3_bucket)"
-key="$(terraform output -raw s3_dump_key)"
-region="$(terraform output -raw region)"
-[[ -n "$bucket" && -n "$key" ]] || { echo "Configure s3_bucket and s3_dump_key." >&2; exit 1; }
-
-temp_dir=$(mktemp -d)
-trap 'rm -rf "$temp_dir"' EXIT
-chmod 700 "$temp_dir"
-aws s3 cp "s3://$bucket/$key" "$temp_dir/dump.sql" --region "$region"
 
 export PGPASSWORD="$TF_VAR_db_master_password" PGHOST="$db_host" PGPORT="$db_port" PGUSER=dbmaster
 psql -X -v ON_ERROR_STOP=1 -v app_user="$app_user" -v app_db="$app_db" -d postgres <<'SQL'
@@ -36,7 +36,7 @@ if [[ "$table_count" != "0" ]]; then
   exit 1
 fi
 
-psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$temp_dir/dump.sql"
+psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$dump_file"
 psql -X -v ON_ERROR_STOP=1 -v app_user="$app_user" -d "$app_db" <<'SQL'
 SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_user') \gexec
 SELECT format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', :'app_user') \gexec
