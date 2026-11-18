@@ -136,7 +136,7 @@ variable "project" {
 }
 
 variable "build_ver" {
-  description = "One-time UTC ISO 8601 identifier supplied through TF_VAR_build_ver. Generate it once for a deployment and keep it stable across repeated plans."
+  description = "One-time UTC timestamp for this deployment, supplied with TF_VAR_build_ver=$(date -u '+%Y-%m-%dT%H:%M:%SZ') or -var=build_ver=$(date -u '+%Y-%m-%dT%H:%M:%SZ') . Generate once and keep stable across repeated plans."
   type        = string
 
   validation {

@@ -108,18 +108,36 @@ exception, so inspect each plan and run a full plan at the end.
    `TF_VAR_app_password`, and `TF_VAR_cookie_salt` there without shell history.
    Also set the resource-provenance values there: `created_by` is evaluated
    from the current OS user (`$USER`, falling back to `$USERNAME`) whenever the
-   file is sourced, and `build_ver` is a one-time UTC timestamp generated with
-   `date -u '+%Y-%m-%dT%H:%M:%SZ'`. Replace `build_ver` only when intentionally
-   starting a distinct deployment; never use Terraform's `timestamp()` for it,
-   because that would change tags on every plan/apply. The application password
-   must match the existing database role; Terraform does not change that role.
+   file is sourced, and `build_ver` is generated automatically in UTC unless it
+   is already set. Sourcing `.env` once and continuing in the same shell keeps
+   both values stable across repeated plans. CI or a wrapper can pre-set
+   `TF_VAR_build_ver` to override generation. Replace the generated identifier
+   only when intentionally starting a distinct deployment; never use
+   Terraform's `timestamp()` for it, because that would change tags on every
+   plan/apply. The application password must match the existing database role;
+   Terraform does not change that role.
 
    ```bash
    cp example.env.txt .env
-   # Edit .env: replace secrets and the build_ver placeholder.
+   # Edit .env only to replace secrets; tag values are generated when sourced.
    set -a
    source .env
    set +a
+   ```
+
+   To get a stable-ish version number, put a value TF_VAR_build_ver="X" in .env 
+   At the shell, generate at timestamp with $(date -u '+%Y-%m-%dT%H:%M:%SZ') 
+   then copy and paste into the .env file 
+
+   You can also supply either tag value directly for one command. Use the same
+   values for plan and apply, preferably by applying the saved plan artifact:
+
+   ```bash
+   terraform plan \
+     -var="created_by=${USER:-${USERNAME:-unknown}}" \
+     -var="build_ver=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+     -out=flyspray.tfplan
+   terraform apply flyspray.tfplan
    ```
 
 3. Initialize and create the service, certificate, ECR repository, and
