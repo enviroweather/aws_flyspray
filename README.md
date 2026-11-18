@@ -247,4 +247,5 @@ bucket versioning. Restrict access to the bucket and its backups.
 - [terraform/scripts/start_build.sh](terraform/scripts/start_build.sh): triggers and waits on a CodeBuild run.
 - [container/Dockerfile](container/Dockerfile): PHP/Apache image.
 - [container/configure.php](container/configure.php): runtime configuration.
+- [container/README.md](container/README.md): local Docker dev/test instructions (not used by CodeBuild).
 - [notes-docker.md](notes-docker.md): historical AI proposal, not instructions.
