@@ -52,9 +52,30 @@ $config = [
         'dbprefix' => $dbPrefix,
     ],
     'general' => [
-        'cookiesalt'    => $cookieSalt,
-        'force_baseurl' => $baseUrl,
-        'syntax_plugin' => $syntaxPlugin,
+        'cookiesalt'       => $cookieSalt,
+        'output_buffering' => 'on',
+        'passwdcrypt'      => '',
+        'dot_path'         => '',
+        'dot_format'       => 'png',
+        'reminder_daemon'  => '0',
+        'doku_url'         => 'http://en.wikipedia.org/wiki/',
+        'syntax_plugin'    => $syntaxPlugin,
+        'update_check'     => '0',
+        'address_rewriting' => '0',
+        'force_baseurl'    => $baseUrl,
+    ],
+    'attachments' => [
+        'zip' => 'application/zip',
+    ],
+    'oauth' => [
+        'github_secret' => '',
+        'github_id' => '',
+        'google_secret' => '',
+        'google_id' => '',
+        'facebook_secret' => '',
+        'facebook_id' => '',
+        'microsoft_secret' => '',
+        'microsoft_id' => '',
     ],
 ];
 
