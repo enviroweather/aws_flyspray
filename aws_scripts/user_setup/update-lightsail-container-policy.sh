@@ -75,22 +75,7 @@ POLICY_DOC=$(cat <<EOF
     {
       "Sid": "ECRAppRepo",
       "Effect": "Allow",
-      "Action": [
-        "ecr:DescribeRepositories",
-        "ecr:ListImages",
-        "ecr:DescribeImages",
-        "ecr:BatchGetImage",
-        "ecr:GetDownloadUrlForLayer",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload",
-        "ecr:PutImage",
-        "ecr:CreateRepository",
-        "ecr:DeleteRepository",
-        "ecr:PutLifecyclePolicy",
-        "ecr:GetLifecyclePolicy"
-      ],
+      "Action": "ecr:*",
       "Resource": "arn:aws:ecr:*:${ACCOUNT_ID}:repository/${APP_NAME}*"
     },
     {
