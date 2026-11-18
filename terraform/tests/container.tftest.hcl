@@ -7,6 +7,9 @@ variables {
   app_hostname       = "flyspray.example.com"
   db_master_password = "test-password"
   app_password       = "test-password"
+  created_by         = "terraform-test"
+  project            = "flyspray-test"
+  build_ver          = "2026-11-18T03:43:43Z"
 }
 
 run "service_before_image" {

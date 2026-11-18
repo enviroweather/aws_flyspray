@@ -24,6 +24,9 @@
 region      = "us-east-2"
 environment = "prod"
 
+# Resource discovery, billing, and cleanup tags. Keep build_ver stable for this stack.
+project = "flyspray"
+
 # --- Legacy static IP name (kept stable; do not change) ---
 instance_name = "flyspray-app"
 

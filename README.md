@@ -103,10 +103,24 @@ exception, so inspect each plan and run a full plan at the end.
    so the legacy IP name does not change. For a new environment start from
    [terraform/terraform.tfvars.example.txt](terraform/terraform.tfvars.example.txt).
    Leave `deploy_flyspray` at its default `false` and `enable_custom_domain`
-   false for the initial stage. Export `TF_VAR_db_master_password`,
-   `TF_VAR_app_password`, and `TF_VAR_cookie_salt` from a secure source (e.g.
-   `.env`), without shell history. The application password must match the
-   existing database role; Terraform does not change that role.
+   false for the initial stage. Copy [example.env.txt](example.env.txt) to the
+   ignored root `.env`, and export `TF_VAR_db_master_password`,
+   `TF_VAR_app_password`, and `TF_VAR_cookie_salt` there without shell history.
+   Also set the resource-provenance values there: `created_by` is evaluated
+   from the current OS user (`$USER`, falling back to `$USERNAME`) whenever the
+   file is sourced, and `build_ver` is a one-time UTC timestamp generated with
+   `date -u '+%Y-%m-%dT%H:%M:%SZ'`. Replace `build_ver` only when intentionally
+   starting a distinct deployment; never use Terraform's `timestamp()` for it,
+   because that would change tags on every plan/apply. The application password
+   must match the existing database role; Terraform does not change that role.
+
+   ```bash
+   cp example.env.txt .env
+   # Edit .env: replace secrets and the build_ver placeholder.
+   set -a
+   source .env
+   set +a
+   ```
 
 3. Initialize and create the service, certificate, ECR repository, and
    CodeBuild project. Review the saved plan before applying it. If Terraform

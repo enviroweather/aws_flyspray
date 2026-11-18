@@ -114,3 +114,33 @@ variable "s3_dump_key" {
   type        = string
   default     = ""
 }
+
+variable "created_by" {
+  description = "Deployment identity supplied through TF_VAR_created_by, preferably evaluated from the current OS user in a local .env file."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.created_by)) > 0
+    error_message = "created_by must not be empty. Set TF_VAR_created_by from $USER on Mac/Linux or the equivalent Windows username."
+  }
+}
+
+variable "project" {
+  description = "Stable project identifier applied to taggable AWS resources for billing and inventory."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9_.:/=+@-]*$", var.project))
+    error_message = "project must be a non-empty AWS tag-safe identifier."
+  }
+}
+
+variable "build_ver" {
+  description = "One-time UTC ISO 8601 identifier supplied through TF_VAR_build_ver. Generate it once for a deployment and keep it stable across repeated plans."
+  type        = string
+
+  validation {
+    condition     = can(regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$", var.build_ver))
+    error_message = "build_ver must be a UTC ISO 8601 timestamp, for example 2026-11-18T03:43:43Z."
+  }
+}

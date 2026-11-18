@@ -1,5 +1,6 @@
 region                 = "us-east-1"
 environment            = "prod"
+project                = "flyspray"
 app_hostname           = "flyspray.example.com"
 container_service_name = "flyspray-containers"
 container_power        = "nano"

@@ -10,11 +10,6 @@ resource "aws_ecr_repository" "flyspray" {
   image_scanning_configuration {
     scan_on_push = true
   }
-
-  tags = {
-    Project     = "flyspray"
-    Environment = var.environment
-  }
 }
 
 resource "aws_ecr_lifecycle_policy" "flyspray" {
@@ -47,11 +42,6 @@ data "archive_file" "container_source" {
 resource "aws_s3_bucket" "build_source" {
   bucket        = "${var.container_service_name}-build-src-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-
-  tags = {
-    Project     = "flyspray"
-    Environment = var.environment
-  }
 }
 
 resource "aws_s3_bucket_public_access_block" "build_source" {
@@ -196,8 +186,4 @@ resource "aws_codebuild_project" "flyspray" {
     }
   }
 
-  tags = {
-    Project     = "flyspray"
-    Environment = var.environment
-  }
 }

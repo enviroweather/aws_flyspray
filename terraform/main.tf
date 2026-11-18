@@ -22,9 +22,20 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  default_tags {
+    tags = local.common_tags
+  }
 }
 
 locals {
+  common_tags = {
+    created_by  = var.created_by
+    project     = var.project
+    build_ver   = var.build_ver
+    environment = var.environment
+  }
+
   az             = "${var.region}a"
   static_ip_name = "${var.instance_name}-static-ip"
 }
@@ -49,11 +60,6 @@ resource "aws_lightsail_database" "flyspray" {
   backup_retention_enabled = true
   preferred_backup_window  = var.db_backup_window
   skip_final_snapshot      = true
-
-  tags = {
-    Project     = "flyspray"
-    Environment = var.environment
-  }
 
   lifecycle {
     prevent_destroy = true

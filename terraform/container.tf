@@ -86,11 +86,6 @@ resource "aws_lightsail_container_service" "flyspray" {
     }
   }
 
-  tags = {
-    Project     = "flyspray"
-    Environment = var.environment
-  }
-
   lifecycle {
     prevent_destroy = true
   }
