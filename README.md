@@ -190,6 +190,9 @@ exception, so inspect each plan and run a full plan at the end.
    database uses a different prefix. The target keeps the old VM in place;
    review the plan for database replacement or other changes.
 
+   ensure the cookie salt need by the flyspray app is also set. It's a good idea
+   to put this into .env file so you could `source ../.env` first to ensure that it is. 
+
    ```bash
    export TF_VAR_deploy_flyspray=true
    export TF_VAR_enable_custom_domain=true
@@ -213,8 +216,13 @@ exception, so inspect each plan and run a full plan at the end.
 
 7. Once the deployment is active and the certificate is attached, replace the
    GoDaddy A record for the app hostname with a CNAME to the **hostname** in
-   `terraform output -raw container_url` (no `https://` or trailing path). DNS
-   changes take time. Verify HTTPS, login, database access, links, and the
+   `terraform output -raw container_url` (no `https://` or trailing path). 
+   For example, replace  `A / `Name=flyspray` / `Data=3.138.88.53` (the previous IP address)
+  with:
+
+  `CNAME` / `Name` `flyspray` / `Data` `flyspray-containers.392sqhm1beyae.us-east-2.cs.amazonlightsail.com`
+
+   DNS changes take time. Verify HTTPS, login, database access, links, and the
    limitations on files and sessions. The default service URL is useful for
    the static `/health.txt` check; the application forces the custom hostname.
 
