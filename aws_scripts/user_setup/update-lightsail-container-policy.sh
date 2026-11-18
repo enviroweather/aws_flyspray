@@ -37,7 +37,7 @@ if [[ -z "$USERNAME" || -z "$APP_NAME" ]]; then
 fi
 
 POLICY_NAME="${APP_NAME}-container-access"
-CODEBUILD_ROLE="${APP_NAME}-codebuild-role"
+CODEBUILD_ROLE="${APP_NAME}-containers-codebuild"
 
 # --- Resolve account ID from current CloudShell session ---
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -91,7 +91,7 @@ POLICY_DOC=$(cat <<EOF
         "ecr:PutLifecyclePolicy",
         "ecr:GetLifecyclePolicy"
       ],
-      "Resource": "arn:aws:ecr:*:${ACCOUNT_ID}:repository/${APP_NAME}"
+      "Resource": "arn:aws:ecr:*:${ACCOUNT_ID}:repository/${APP_NAME}*"
     },
     {
       "Sid": "CodeBuildApp",
@@ -107,7 +107,7 @@ POLICY_DOC=$(cat <<EOF
         "codebuild:UpdateProject",
         "codebuild:DeleteProject"
       ],
-      "Resource": "*"
+      "Resource": "arn:aws:codebuild:*:${ACCOUNT_ID}:project/${APP_NAME}*"
     },
     {
       "Sid": "CodeBuildLogs",
@@ -121,10 +121,23 @@ POLICY_DOC=$(cat <<EOF
       "Resource": "arn:aws:logs:*:${ACCOUNT_ID}:log-group:/aws/codebuild/*"
     },
     {
-      "Sid": "IAMPassRoleForCodeBuild",
+      "Sid": "IAMManageAppRoles",
       "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::${ACCOUNT_ID}:role/${CODEBUILD_ROLE}"
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:TagRole",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::${ACCOUNT_ID}:role/${APP_NAME}-*"
     }
   ]
 }
@@ -138,6 +151,14 @@ aws iam put-user-policy \
 
 echo ""
 echo "==> Done. Policy '$POLICY_NAME' applied to: $USERNAME"
+echo ""
+echo "==> Permissions granted:"
+echo "    lightsail:*                                          (all Lightsail resources)"
+echo "    ecr:* on repository/${APP_NAME}*                    (manage ECR repos and images)"
+echo "    codebuild:* on project/${APP_NAME}*                 (manage CodeBuild projects)"
+echo "    logs:* on /aws/codebuild/*                          (read build logs)"
+echo "    iam:CreateRole/DeleteRole/etc on role/${APP_NAME}-* (manage app IAM roles)"
+echo "    iam:PassRole on role/${CODEBUILD_ROLE}"
 echo ""
 echo "==> Verify with:"
 echo "    aws iam get-user-policy --user-name $USERNAME --policy-name $POLICY_NAME"

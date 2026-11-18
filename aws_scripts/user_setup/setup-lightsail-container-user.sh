@@ -42,8 +42,7 @@ if [[ -z "$USERNAME" || -z "$GROUP_NAME" || -z "$APP_NAME" ]]; then
 fi
 
 POLICY_NAME="${APP_NAME}-container-access"
-CODEBUILD_ROLE="${APP_NAME}-codebuild-role"
-CODEBUILD_PROJECT="${APP_NAME}-build"
+CODEBUILD_ROLE="${APP_NAME}-containers-codebuild"
 
 # --- Resolve account ID from current CloudShell session ---
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -113,7 +112,8 @@ POLICY_DOC=$(cat <<EOF
         "ecr:PutLifecyclePolicy",
         "ecr:GetLifecyclePolicy"
       ],
-      "Resource": "arn:aws:ecr:*:${ACCOUNT_ID}:repository/${APP_NAME}"
+      "Resource": "arn:aws:ecr:*:${ACCOUNT_ID}:repository/${APP_NAME}*"
+
     },
     {
       "Sid": "CodeBuildApp",
@@ -129,7 +129,7 @@ POLICY_DOC=$(cat <<EOF
         "codebuild:UpdateProject",
         "codebuild:DeleteProject"
       ],
-      "Resource": "*"
+      "Resource": "arn:aws:codebuild:*:${ACCOUNT_ID}:project/${APP_NAME}*"
     },
     {
       "Sid": "CodeBuildLogs",
@@ -143,10 +143,23 @@ POLICY_DOC=$(cat <<EOF
       "Resource": "arn:aws:logs:*:${ACCOUNT_ID}:log-group:/aws/codebuild/*"
     },
     {
-      "Sid": "IAMPassRoleForCodeBuild",
+      "Sid": "IAMManageFlysprayRoles",
       "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::${ACCOUNT_ID}:role/${CODEBUILD_ROLE}"
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:TagRole",
+        "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::${ACCOUNT_ID}:role/${APP_NAME}-*"
     }
   ]
 }
@@ -182,12 +195,13 @@ echo "    Group:          $GROUP_NAME"
 echo "    Inline policy:  $POLICY_NAME"
 echo ""
 echo "==> Permissions granted:"
-echo "    lightsail:*                              (all Lightsail resources)"
-echo "    ecr:* on arn:...:repository/$APP_NAME    (push/pull container images)"
-echo "    codebuild:* on $CODEBUILD_PROJECT        (trigger and monitor builds)"
-echo "    logs:* on /aws/codebuild/*               (read build logs)"
-echo "    iam:PassRole $CODEBUILD_ROLE"
-echo "    + all permissions inherited from group:  $GROUP_NAME"
+echo "    lightsail:*                                        (all Lightsail resources)"
+echo "    ecr:* on repository/${APP_NAME}*                  (manage ECR repos and images)"
+echo "    codebuild:* on project/${APP_NAME}*               (manage CodeBuild projects)"
+echo "    logs:* on /aws/codebuild/*                        (read build logs)"
+echo "    iam:CreateRole/DeleteRole/etc on role/${APP_NAME}-*  (manage app IAM roles)"
+echo "    iam:PassRole on role/${APP_NAME}-containers-codebuild"
+echo "    + all permissions inherited from group: $GROUP_NAME"
 echo ""
 echo "==> To generate CLI/Terraform access keys:"
 echo "    aws iam create-access-key --user-name $USERNAME"
