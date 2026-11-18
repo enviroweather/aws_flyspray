@@ -13,6 +13,10 @@ tfplan
 *.php
 !container/configure.php
 
+# Local dev/test Postgres dump for container/docker-compose.dev.yml
+container/dev-dump/*
+!container/dev-dump/.gitkeep
+
 
 # Local .terraform directories
 .terraform/

@@ -1,0 +1,44 @@
+# Local Dockerfile dev/test stack only — see README.md. Not used by CodeBuild
+# or any production deployment.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: flyspray
+      POSTGRES_USER: flyspray_user
+      POSTGRES_PASSWORD: dev-only-password
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Any *.sql/*.sh dropped here runs once, only against a fresh (empty) volume.
+      - ./dev-dump:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flyspray_user -d flyspray"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        INCLUDE_SETUP: "true"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: flyspray
+      DB_USER: flyspray_user
+      DB_PASS: dev-only-password
+      DB_PREFIX: flyspray_
+      APP_BASE_URL: http://localhost:8080/
+      COOKIE_SALT: dev-only-cookie-salt-value
+      SYNTAX_PLUGIN: ""
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

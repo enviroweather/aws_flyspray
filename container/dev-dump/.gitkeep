@@ -1,0 +1,3 @@
+Drop a plain-SQL Flyspray dump here (e.g. dump.sql) to have the dev Postgres
+container load it automatically on first start. Files are ignored by git
+except this placeholder; see container/README.md.
