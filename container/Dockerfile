@@ -1,4 +1,4 @@
-FROM php:8.3-apache
+FROM php:8.2-apache
 
 ARG FLYSPRAY_VERSION=1.0-rc11
 # Local dev/test only (see container/README.md); CodeBuild never sets this.
