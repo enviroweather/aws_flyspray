@@ -1,5 +1,177 @@
 # Notes on building flyspray instance on AWS lightsail
 
+### 11/18 stuck in upgrade hell
+
+the db dump we have is from an old version and it needs to be 'upgraded' to work withthe 
+current version of flyspray.   The prod version of flyspray has the setup folder (and upgrade script)
+removed to keep it safe, but the db sql needs upgrading!  solution: use our local docker compose version
+
+Here are the instructions
+
+That is a sound one-time migration strategy and is safer than exposing `/setup/upgrade.php` on the public Lightsail container. I’ll verify the Compose database settings and then outline the exact upgrade/export/re-import sequence, including the important backup/reset and version checks.
+
+Read 
+
+Read 
+
+Read 
+
+Yes. The local Compose database can be used as a disposable migration workstation, then production remains on a normal setup-free image. You do **not** need to enter local database settings into Flyspray because `configure.php` supplies them; the only local setup action needed should be the version upgrade itself.
+
+Ran terminal command:  if [[ -f "$HOME/Downloads/flyspray_22_10_2026.sql" ]]; then printf '%s\n' '--- dump header ---'; sed -n '1,45p' "$HOME/Downloads/flyspray_22_10_2026.sql"; printf '%s\n' '--- database/role directives ---'; grep -nE '^(CREATE DATABASE|CREATE ROLE|ALTER (DATABASE|SCHEMA|TABLE|SEQUENCE|FUNCTION)|\\connect|\\c )' "$HOME/Downloads/flyspray_22_10_2026.sql" | head -40; else echo 'Dump not found'; fi
+
+Yes—this is the safer one-time approach. It avoids exposing the upgrade interface publicly and requires no production rebuild afterward, because the current production image already generates `flyspray.conf.php` correctly at startup.
+
+The redirect is caused by:
+
+```text
+Database fs_ver: 1.0-rc3
+Image version:   1.0-rc11
+```
+
+Not by a missing configuration file.
+
+## 1. Start with a completely fresh local database
+
+From `container`:
+
+```bash
+mkdir -p dev-dump
+cp ~/Downloads/flyspray_22_10_2026.sql dev-dump/import.sql
+
+docker compose -f docker-compose.dev.yml down -v
+docker compose -f docker-compose.dev.yml up --build
+```
+
+The Postgres container will import the dump once. Keep that terminal running for logs.
+
+Important: `down -v` deletes the local Compose database—not Lightsail.
+
+## 2. Run the Flyspray upgrade locally
+
+Open:
+
+```text
+http://localhost:8080/setup/upgrade.php
+```
+
+Follow the upgrade workflow. The database connection is already configured:
+
+```text
+Host:     db
+Port:     5432
+Database: flyspray
+User:     flyspray_user
+Password: dev-only-password
+Prefix:   flyspray_
+```
+
+You should not need to recreate `flyspray.conf.php`; the entrypoint generates it from Compose environment variables.
+
+After upgrading, confirm that the normal application loads:
+
+```text
+http://localhost:8080/
+```
+
+Test a login and representative tasks.
+
+## 3. Verify the schema version
+
+Run:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T db \
+  psql -U flyspray_user -d flyspray \
+  -c "SELECT pref_value FROM flyspray_prefs WHERE pref_name='fs_ver';"
+```
+
+It should report:
+
+```text
+1.0-rc11
+```
+
+Also check application access:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  http://localhost:8080/
+```
+
+## 4. Export the upgraded database
+
+Create a portable plain-SQL dump:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T db \
+  pg_dump -U flyspray_user -d flyspray \
+  --format=plain \
+  --no-owner \
+  --no-privileges \
+  --clean \
+  --if-exists \
+  > ~/Downloads/flyspray_1.0-rc11_upgraded.sql
+```
+
+`--clean` means the dump contains statements to remove old objects before recreating them. `--no-owner` avoids requiring local Compose roles in Lightsail.
+
+Verify that the file is nonempty:
+
+```bash
+ls -lh ~/Downloads/flyspray_1.0-rc11_upgraded.sql
+head -20 ~/Downloads/flyspray_1.0-rc11_upgraded.sql
+```
+
+## 5. Back up Lightsail before replacing anything
+
+Because `--clean` replaces database objects, first take a backup of the current Lightsail database. Verify the backup exists and keep the original dump too.
+
+The normal `scripts/import_db.sh` refuses to import into a nonempty database. Do not bypass that protection casually.
+
+For this one-time operation, the safest options are:
+
+1. Drop and recreate the empty Flyspray application database after taking a backup, then use the existing script; or
+2. Use the `--clean` dump in a single PostgreSQL transaction after stopping/isolating application traffic.
+
+Do not simultaneously let requests modify the old database during replacement.
+
+## 6. Restore into Lightsail
+
+After reviewing the backup and replacing/emptying the target database, run from `terraform`:
+
+```bash
+source ../.env
+bash scripts/import_db.sh \
+  ~/Downloads/flyspray_1.0-rc11_upgraded.sql
+```
+
+Then verify:
+
+```sql
+SELECT pref_value
+FROM flyspray_prefs
+WHERE pref_name = 'fs_ver';
+```
+
+Expected: `1.0-rc11`.
+
+Because Flyspray’s upgrade altered the database, the live container should stop redirecting after the restore. A container restart will refresh its runtime state, but a rebuild is not necessary unless container application code actually changed.
+
+## Important production detail
+
+The Lightsail objects imported by `import_db.sh` are owned by `dbmaster`, while the application role has runtime privileges. That is fine for normal operation, but the application role should not perform future schema upgrades against tables it does not own. Use the master role or continue performing upgrades in local Compose.
+
+After success:
+
+```bash
+docker compose -f docker-compose.dev.yml down -v
+```
+
+The production Dockerfile should remain at `INCLUDE_SETUP=false`, keeping `/setup` removed.
+
+
+
 ### 11/17 2pm
 
 All checks pass. Summary of the redesign addressing your corrections:
