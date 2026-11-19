@@ -25,6 +25,7 @@ services:
       args:
         INCLUDE_SETUP: "true"
     environment:
+      INCLUDE_SETUP: true 
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: flyspray
@@ -32,8 +33,9 @@ services:
       DB_PASS: dev-only-password
       DB_PREFIX: flyspray_
       APP_BASE_URL: http://localhost:8080/
-      COOKIE_SALT: dev-only-cookie-salt-value
+      COOKIE_SALT: dev-only-cookie
       SYNTAX_PLUGIN: ""
+
     ports:
       - "8080:80"
     depends_on:

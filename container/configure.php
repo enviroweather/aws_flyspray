@@ -57,12 +57,13 @@ $config = [
         'passwdcrypt'      => '',
         'dot_path'         => '',
         'dot_format'       => 'png',
-        'reminder_daemon'  => '0',
+        'reminder_daemon'  => '1',
         'doku_url'         => 'http://en.wikipedia.org/wiki/',
-        'syntax_plugin'    => $syntaxPlugin,
-        'update_check'     => '0',
+        'syntax_plugin'    => 'none',
+        'update_check'     => '1',
         'address_rewriting' => '0',
         'force_baseurl'    => $baseUrl,
+        'securecookies'    => ''
     ],
     'attachments' => [
         'zip' => 'application/zip',
