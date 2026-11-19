@@ -32,11 +32,14 @@ resource "aws_ecr_lifecycle_policy" "flyspray" {
 # ---------------------------------------------------------------------------
 # Build source — the container/ folder is zipped and uploaded for CodeBuild.
 # No local Docker or GitHub connection is required to build the image.
+# The local docker compose script read db from the 'dev-dump' folder, but 
+# exclude that for prod container
 # ---------------------------------------------------------------------------
 data "archive_file" "container_source" {
   type        = "zip"
   source_dir  = "${path.module}/../container"
   output_path = "${path.module}/.build/container-source.zip"
+  excludes    = ["dev-dump"]
 }
 
 resource "aws_s3_bucket" "build_source" {
