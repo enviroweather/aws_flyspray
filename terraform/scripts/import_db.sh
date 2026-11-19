@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+force=false
+
+while getopts "f" opt; do
+  case "$opt" in
+    f) force=true ;;
+    *) echo "Usage: bash myscript.sh [-f] /path/to/file" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
 if [[ $# -ne 1 ]]; then
-  echo "Usage: bash scripts/import_db.sh /path/to/dump.sql" >&2
+  echo "Usage: bash scripts/import_db.sh /path/to/dump.sql [-f]" >&2
   exit 2
 fi
 
@@ -30,10 +40,19 @@ SELECT format('CREATE DATABASE %I OWNER %I', :'app_db', :'app_user')
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'app_db') \gexec
 SQL
 
+
+
+
 table_count=$(psql -X -At -v ON_ERROR_STOP=1 -d "$app_db" -c "SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');")
+
+  
 if [[ "$table_count" != "0" ]]; then
-  echo "Refusing to import into a database with existing public tables." >&2
-  exit 1
+  if [ "$force" = false ]; then
+    echo "Refusing to import into a database with existing public tables. use the -f flag to force overwrite" >&2
+    exit 1
+  else
+    echo "$table_count tables exist but force flag is set, overwriting...  " >&2
+  fi
 fi
 
 psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$dump_file"
