@@ -1,5 +1,374 @@
 # Notes on building flyspray instance on AWS lightsail
 
+## Rebuilding the container after changes
+
+when rebuilding, It turns out you can't just 
+`export TF_VAR_deploy_flyspray=true`   sets the variable as a string "true" but Terraform's type system is strict — your variable is declared as type = bool, so it needs an actual boolean. It needs to be set in tfvars or pass -var="deploy_flyspray=true" on the command line
+
+```
+ terraform apply \                                                                                                               
+  -var="deploy_flyspray=true" \
+  -var="enable_custom_domain=true" \
+  -var="cookie_salt="<valueorenvironmentvar>"
+```
+
+
+
+check if the S3 build source contains the current `container` contents or must be refreshed with Terraform before `start_build.sh`.
+
+Ran terminal command:  set -a; source .env; set +a; terraform -chdir=terraform state list; printf '\n--- current build object ---\n'; terraform -chdir=terraform state show 'aws_s3_object.container_source' | sed -n '1,30p'; printf '\n--- current codebuild project ---\n'; terraform -chdir=terraform state show 'aws_codebuild_project.flyspray' | grep -E '^\s+(name|source|location|buildspec|value|INCLUDE_SETUP)' | head -40
+
+Read 
+
+Read 
+
+Read , lines 100 to 161
+
+Ran terminal command:  set -a; source .env; set +a; terraform -chdir=terraform plan -out=rebuild.tfplan -target=aws_s3_object.container_source -target=aws_codebuild_project.flyspray
+
+One critical prerequisite surfaced: the build archive currently includes the whole `container` folder, including `dev-dump/import.sql` and `orig.db.sql.txt`. They are not copied into the final image, but they would be uploaded to S3 and sent to CodeBuild. I’ll exclude database dumps from that build archive first, then regenerate the safe targeted plan.
+
+
+
+
+
+
+````
+
+````
+
+
+Ran terminal command:  terraform -chdir=terraform fmt -check terraform 2>/dev/null || terraform fmt terraform/build.tf; terraform -chdir=terraform validate && set -a; source .env; set +a; terraform -chdir=terraform plan -out=rebuild.tfplan -target=aws_s3_object.container_source -target=aws_codebuild_project.flyspray
+
+Ran terminal command:  bash tests/test-configure.sh && php -l container/configure.php && bash -n terraform/scripts/start_build.sh && terraform -chdir=terraform validate && git diff --check -- container terraform/build.tf
+
+The rebuild needs **two stages**: upload the current container source, then build it.
+
+## 1. Refresh CodeBuild source and configuration
+
+I prepared and validated:
+
+```bash
+cd terraform
+terraform show rebuild.tfplan
+terraform apply rebuild.tfplan
+```
+
+This changes only:
+
+- S3 build ZIP from the current `container`
+- CodeBuild source location/build arguments
+- `INCLUDE_SETUP=false`
+
+It does not deploy Lightsail, alter the database, or restart the app.
+
+
+## 2. Build and push to ECR
+
+```bash
+bash scripts/start_build.sh
+```
+
+This pushes the newly built digest to the existing `latest` tag.
+
+## 3. Deploy that new digest to Lightsail
+
+A successful CodeBuild alone does **not** update the running container.
+
+From `terraform`:
+
+```bash
+set -a
+source ../.env
+set +a
+
+export TF_VAR_deploy_flyspray=true
+
+terraform plan \
+  -target=aws_lightsail_container_service_deployment_version.flyspray \
+  -out=deployment.tfplan
+
+terraform show deployment.tfplan
+terraform apply deployment.tfplan
+```
+
+Confirm the deployment becomes active, then test:
+
+```bash
+curl -I https://flyspray.enviroweather.net/health.txt
+```
+
+The plan should replace/update only the Lightsail deployment version and pin the new ECR digest. Review it before applying.
+
+**Important:** The production container deployment also runs `configure.php` at every startup, but the database now holds the migrated schema and repaired search data separately. The image rebuild fixes application/config code; it does not replace the database.
+
+Assumptions: Terraform 1.17, AWS provider 5.x, existing local state. Validation passed, and nothing has been applied or deployed by this response.
+
+Made changes.
+
+
+### oh the db upgrade pain: passwords and searches
+
+Needed to clear out/reset everyone fs passwords.  
+
+Once the local docker compose db is up and running (and db imported from the dev-dump folder),
+run this new script container/scripts/reset_local_passwords.sh to put new passwords in the db
+and documnnt those new passwords. 
+
+there are also problems with some wonky search paths in the db no longer compatible, so once 
+logged in, the page was just blank - cleared those out of the db
+
+the new list of passwords and new db dump are saved on Sharepoint (general/it management/flyspray)
+
+----
+
+#### MAI code 2 session to figure this out and fix it
+
+I’ll distinguish a blank authenticated page from missing project/group permissions versus migrated serialized searches breaking the template. We already saw an `unserialize()` notice in `links.searches.tpl`; I’ll inspect the project membership, task counts, rendered HTML, and the legacy serialized fields.
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -P pager=off -c "SELECT p.project_id,p.project_title,p.project_is_active FROM flyspray_projects p ORDER BY p.project_id;" -c "SELECT project_id,count(*) AS task_count,min(task_id) AS first_task,max(task_id) AS last_task FROM flyspray_tasks GROUP BY project_id ORDER BY project_id;" -c "SELECT uig.user_id,u.user_name,uig.group_id,g.group_name,g.project_id,g.group_open FROM flyspray_users_in_groups uig JOIN flyspray_users u USING(user_id) JOIN flyspray_groups g USING(group_id) WHERE u.user_name='brownja' ORDER BY g.project_id,g.group_id;"
+
+Ran terminal command:  cred_file=/Users/billspat/Code/enviroweather-project/new_flyspray_passwords.txt; tmp_password=$(grep '^2,brownja,' "$cred_file" | head -1 | cut -d, -f3); rm -f /tmp/flyspray-auth-cookies.txt /tmp/flyspray-stations.html; curl -fsS -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /dev/null http://localhost:8080/; curl -fsSL -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /tmp/flyspray-stations.html --data-urlencode 'user_name=brownja' --data-urlencode "password=$tmp_password" --data-urlencode 'return_to=/' 'http://localhost:8080/index.php?do=authenticate'; printf 'HTML bytes: '; wc -c < /tmp/flyspray-stations.html; printf '\nWarnings/fatals/notices:\n'; grep -oiE '(Warning|Notice|Fatal error):[^<]+' /tmp/flyspray-stations.html | head -30; printf '\nProject/task excerpts:\n'; grep -oiE 'Stations|No tasks found|[0-9]+ tasks?|task_id[^>]*' /tmp/flyspray-stations.html | head -40; unset tmp_password
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T app sh -c 'nl -ba /var/www/html/themes/CleanFS/templates/links.searches.tpl | sed -n "1,80p"; nl -ba /var/www/html/includes/class.tpl.php | grep -n -B3 -A8 "unserialize" | head -80'
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -P pager=off -c "SELECT search_id,user_id,project_id,name,octet_length(search_string) AS bytes,left(search_string,40) AS preview FROM flyspray_searches ORDER BY search_id;" -c "SELECT column_name,data_type,character_maximum_length FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('flyspray_tasks','flyspray_searches') ORDER BY table_name,ordinal_position;"
+
+The data is present: `Stations` has 3,768 tasks, and `brownja` is a project-manager member. The blank appearance is not missing issues. The authenticated page is rendering only partway through because legacy saved-search serialization is invalid under modern PHP/Flyspray; I’ll inspect the page cutoff and the saved-search payload, then safely clear only broken saved-search rows in the disposable Compose database.
+
+Ran terminal command:  printf '%s\n' '--- page tail ---'; nl -ba /tmp/flyspray-stations.html | tail -100; printf '%s\n' '--- task controls/content ---'; grep -nEi 'tasklist|item_summary|projectselector|content|showtask|Stations|nosearches|Error at offset' /tmp/flyspray-stations.html | head -100
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -P pager=off -c "SELECT id,user_id,name,octet_length(search_string) AS bytes,left(search_string,80) AS preview FROM flyspray_searches ORDER BY id;" -c "SELECT u.user_name,s.id,s.name FROM flyspray_searches s JOIN flyspray_users u USING(user_id) ORDER BY u.user_name,s.id;"
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T app sh -c 'grep -Rni "new Flyspray\|search_string\|INSERT INTO.*searches\|unserialize(.*search" /var/www/html/includes /var/www/html/scripts 2>/dev/null | head -120'
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -At -F '|' -c "SELECT id,user_id,encode(convert_to(search_string,'UTF8'),'base64') FROM flyspray_searches ORDER BY id;" | php -r '$validRaw=$validStripped=$invalid=0; while(($line=fgets(STDIN))!==false){[$id,$uid,$b64]=explode("|",rtrim($line,"\n"),3); $s=base64_decode($b64); $raw=@unserialize($s); $fixed=@unserialize(stripslashes($s)); if(is_array($raw)){$validRaw++;} elseif(is_array($fixed)){$validStripped++; echo "id=$id user=$uid repaired_by_stripslashes\n";} else {$invalid++; echo "id=$id user=$uid still_invalid\n";}} echo "raw_valid=$validRaw stripslashes_valid=$validStripped invalid=$invalid\n";'
+
+Read , lines 1 to 80
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -q -c "COPY (SELECT id,user_id,encode(convert_to(search_string,'UTF8'),'base64') FROM flyspray_searches ORDER BY id) TO STDOUT WITH (FORMAT csv)" | php -r '$raw=0;$fixed=0;$invalid=0; while(($line=fgets(STDIN))!==false){$cols=str_getcsv(rtrim($line,"\r\n")); if(count($cols)!==3)continue; [$id,$uid,$b64]=$cols; $s=base64_decode($b64); if(is_array(@unserialize($s))){$raw++;} elseif(is_array(@unserialize(stripslashes($s)))){$fixed++; echo "id=$id user=$uid repaired_by_stripslashes\n";} else {$invalid++; echo "id=$id user=$uid still_invalid\n";}} echo "raw_valid=$raw stripslashes_valid=$fixed invalid=$invalid\n";'
+
+No matches found.
+
+Searched for regex `wrap|still_invalid|raw_valid` (`**/*.txt`), 9 results
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -P pager=off -c "SELECT position((chr(92) || chr(34)) IN search_string)>0 AS legacy_backslash_escaping,count(*) FROM flyspray_searches GROUP BY 1 ORDER BY 1;" -c "SELECT id,user_id,name FROM flyspray_searches WHERE position((chr(92) || chr(34)) IN search_string)>0 ORDER BY id;"
+
+Ran terminal command:  cred_file=/Users/billspat/Code/enviroweather-project/new_flyspray_passwords.txt; password=$(grep '^2,brownja,' "$cred_file" | head -1 | cut -d, -f3); rm -f /tmp/flyspray-auth-cookies.txt; curl -fsS -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /dev/null http://localhost:8080/; curl -fsS -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /dev/null --data-urlencode 'user_name=brownja' --data-urlencode "password=$password" --data-urlencode 'return_to=/' http://localhost:8080/index.php?do=authenticate; for url in 'http://localhost:8080/' 'http://localhost:8080/?project=2'; do printf '%s -> ' "$url"; curl -sS -b /tmp/flyspray-auth-cookies.txt -o /tmp/flyspray-page.html -w 'HTTP %{http_code}, %{size_download} bytes\n' "$url"; done; unset password
+
+The saved-search rows—not task rows—are causing the page to abort. Twelve legacy rows contain backslash-escaped serialized PHP strings; rc11 calls `unserialize()` and then passes the failure (`false`) to `http_build_query()`, which throws before the task list renders. I’ll first prove all 12 are repairable by removing only quote escapes in a rollback-only test, leaving 11 valid searches unchanged.
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -P pager=off -At -c "SELECT encode(convert_to(replace(search_string, chr(92) || chr(34), chr(34)),'UTF8'),'base64') FROM flyspray_searches WHERE id IN (1,2);" | while IFS= read -r encoded; do [[ -z "$encoded" ]] && continue; printf '%s' "$encoded" | base64 -d | php -r '$s=stream_get_contents(STDIN); echo is_array(@unserialize($s)) ? "valid serialized array\n" : "still invalid\n";'; done
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T app php -r '$pdo=new PDO("pgsql:host=db;dbname=flyspray", "flyspray_user", "dev-only-password"); $stmt=$pdo->query("SELECT id, search_string FROM flyspray_searches ORDER BY id"); $raw=$fixed=$invalid=0; foreach($stmt as $r){$s=$r["search_string"]; if(is_array(@unserialize($s))){$raw++; continue;} $s2=str_replace(chr(92).chr(34),chr(34),$s); if(is_array(@unserialize($s2))){$fixed++; echo "id={$r["id"]} repaired_by_quote_unescape\n";} else {$invalid++; echo "id={$r["id"]} still_invalid\n";}} echo "raw_valid=$raw repaired=$fixed invalid=$invalid\n";'
+
+All 23 saved searches are accounted for: 11 already deserialize correctly, and the 12 legacy rows become valid with one narrow transformation—removing backslashes before quotes. I’ll apply that migration only to the local Compose database, then retest the Stations task page and ensure the fatal exception disappears.
+
+Ran terminal command:  docker compose -f container/docker-compose.dev.yml exec -T db psql -U flyspray_user -d flyspray -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+UPDATE flyspray_searches
+SET search_string = replace(search_string, chr(92) || chr(34), chr(34))
+WHERE position((chr(92) || chr(34)) IN search_string) > 0;
+COMMIT;
+SQL
+cred_file=/Users/billspat/Code/enviroweather-project/new_flyspray_passwords.txt; password=$(grep '^2,brownja,' "$cred_file" | head -1 | cut -d, -f3); rm -f /tmp/flyspray-auth-cookies.txt /tmp/flyspray-stations-fixed.html; curl -fsS -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /dev/null 'http://localhost:8080/'; curl -fsSL -c /tmp/flyspray-auth-cookies.txt -b /tmp/flyspray-auth-cookies.txt -o /tmp/flyspray-stations-fixed.html --data-urlencode 'user_name=brownja' --data-urlencode "password=$password" --data-urlencode 'return_to=/?project=2' 'http://localhost:8080/index.php?do=authenticate'; unset password; http_bytes=$(wc -c < /tmp/flyspray-stations-fixed.html | tr -d ' '); printf 'Rendered bytes: %s\n' "$http_bytes"; if grep -qE 'Unhandled exception|Error at offset|Fatal error' /tmp/flyspray-stations-fixed.html; then echo 'Render error remains' >&2; exit 1; fi; grep -q 'Stations' /tmp/flyspray-stations-fixed.html && echo 'Stations page rendered'; grep -qE 'task_id=[0-9]+|item_summary|tasklist_table' /tmp/flyspray-stations-fixed.html && echo 'Task list controls/content rendered' || echo 'Task list markers not found; inspect filters/result count'; grep -oiE 'Showing[^<]*|No tasks[^<]*|[0-9]+ results?' /tmp/flyspray-stations-fixed.html | head -20
+
+The issues exist, and the page is now fixed locally.
+
+Cause:
+
+- `Stations` contains **3,768 tasks**
+- Twelve legacy saved-search rows used backslash-escaped PHP serialization.
+- PHP 8.2 could not deserialize one row and aborted rendering before the task list.
+
+Applied locally:
+
+- Repaired 12 saved-search records.
+- Left 11 already-valid searches unchanged.
+- No task/project/user data was deleted.
+
+Verification:
+
+- Stations page rendered successfully.
+- No `unserialize` or unhandled exception.
+- Task list displayed: **tasks 1–25 of 935 matching tasks**.
+
+==========================
+
+The local Compose database now contains the fixes and password resets. 
+**Export this final version before replacing Lightsail:**
+
+```bash
+cd container
+
+docker compose -f docker-compose.dev.yml exec -T db \
+  pg_dump -U flyspray_user -d flyspray \
+  --format=plain --no-owner --no-privileges \
+  > ~/Downloads/flyspray-final-migrated.sql
+```
+=========
+
+
+Treat that as the authoritative migration dump. It includes the upgraded schema, bcrypt password resets, and saved-search repair. Keep the generated password list private, distribute it, and then delete it securely.
+
+
+---
+#### updating the 'prod' db on AWS Lightsail
+
+we need to take our updated db and get it on AWS.  
+
+I’ll verify the current import script before giving the cutover sequence, because it should remain the guarded restore path after the database is dropped.
+
+Read 
+
+Recommended approach: **rename the current database instead of dropping it**, import into a fresh database, verify, and retain the renamed database for rollback.
+
+Run from `terraform`:
+
+```bash
+set -a
+source ../.env
+set +a
+
+DB_HOST=$(terraform output -raw db_endpoint)
+DB_PORT=$(terraform output -raw db_port)
+APP_DB=$(terraform output -raw app_db)
+BACKUP_DB="${APP_DB}_before_final_20261118"
+```
+
+## 1. Back up the current Lightsail database
+
+```bash
+PGPASSWORD="$TF_VAR_db_master_password" pg_dump \
+  -X \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U dbmaster \
+  -d "$APP_DB" \
+  --format=custom \
+  --no-owner \
+  --no-privileges \
+  > "$HOME/Downloads/lightsail-before-final.dump"
+```
+
+Verify it was created:
+
+```bash
+ls -lh "$HOME/Downloads/lightsail-before-final.dump"
+pg_restore -l "$HOME/Downloads/lightsail-before-final.dump" | head
+```
+
+## 2. Rename the current database
+
+This forces a clean import target while preserving the old database:
+
+```bash
+PGPASSWORD="$TF_VAR_db_master_password" psql \
+  -X \
+  -v ON_ERROR_STOP=1 \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U dbmaster \
+  -d postgres \
+  -v app_db="$APP_DB" \
+  -v backup_db="$BACKUP_DB" <<'SQL'
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'app_db'
+  AND pid <> pg_backend_pid();
+
+SELECT format(
+  'ALTER DATABASE %I RENAME TO %I',
+  :'app_db',
+  :'backup_db'
+) \gexec
+SQL
+```
+
+The application may be unavailable briefly after this command.
+
+## 3. Import the new local dump
+
+```bash
+bash scripts/import_db.sh \
+  "$HOME/Downloads/flyspray-final-migrated.sql"
+```
+
+The script:
+
+- Creates the fresh application database.
+- Restores the dump in one transaction.
+- Refuses to import if public tables already exist.
+- Grants required privileges to the application role.
+
+## 4. Verify the migrated database
+
+```bash
+PGPASSWORD="$TF_VAR_app_password" psql \
+  -X \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U "$(terraform output -raw app_user)" \
+  -d "$APP_DB" \
+  -v ON_ERROR_STOP=1 \
+  -c "SELECT pref_value AS flyspray_version
+      FROM flyspray_prefs WHERE pref_name='fs_ver';" \
+  -c "SELECT count(*) AS station_tasks
+      FROM flyspray_tasks WHERE project_id=2;" \
+  -c "SELECT count(*) AS users FROM flyspray_users;" \
+  -c "SELECT count(*) AS saved_searches FROM flyspray_searches;"
+```
+
+Expected:
+
+```text
+flyspray_version = 1.0-rc11
+station_tasks     = 3768
+users             = 7
+saved_searches    = 23
+```
+
+Then test:
+
+```bash
+curl -I https://flyspray.enviroweather.net/health.txt
+```
+
+and log in using a temporary credential from the private password file.
+
+## Rollback if import or verification fails
+
+```bash
+PGPASSWORD="$TF_VAR_db_master_password" psql \
+  -X \
+  -v ON_ERROR_STOP=1 \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U dbmaster \
+  -d postgres \
+  -v app_db="$APP_DB" \
+  -v backup_db="$BACKUP_DB" <<'SQL'
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'app_db'
+  AND pid <> pg_backend_pid();
+
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'backup_db'
+  AND pid <> pg_backend_pid();
+
+SELECT format('DROP DATABASE %I', :'app_db') \gexec
+SELECT format('ALTER DATABASE %I RENAME TO %I',
+              :'backup_db', :'app_db') \gexec
+SQL
+```
+
+Do not delete the renamed database until the new Lightsail version has been verified.
+
+**Assumption/risk:** Terraform local workflow, production-critical data cutover; the main risks are downtime and accidental data loss. No commands above should be run without verifying the dump and backup. State is not changed by these steps.
+
+
 ### 11/18 stuck in upgrade hell
 
 the db dump we have is from an old version and it needs to be 'upgraded' to work withthe 
