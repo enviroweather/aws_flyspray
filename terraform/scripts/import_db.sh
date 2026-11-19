@@ -40,22 +40,42 @@ SELECT format('CREATE DATABASE %I OWNER %I', :'app_db', :'app_user')
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'app_db') \gexec
 SQL
 
-
-
+export PGUSER="$app_user" PGPASSWORD="$TF_VAR_app_password"
 
 table_count=$(psql -X -At -v ON_ERROR_STOP=1 -d "$app_db" -c "SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p');")
 
-  
 if [[ "$table_count" != "0" ]]; then
-  if [ "$force" = false ]; then
-    echo "Refusing to import into a database with existing public tables. use the -f flag to force overwrite" >&2
+  if [[ "$force" != true ]]; then
+    echo "Refusing to import into a database with existing public tables. Use -f to request replacement." >&2
     exit 1
-  else
-    echo "$table_count tables exist but force flag is set, overwriting...  " >&2
   fi
-fi
 
-psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$dump_file"
+  echo "WARNING: This will delete every table, view, sequence, function, and relationship in schema public." >&2
+  echo "Database: $app_db" >&2
+  echo "Host:     $db_host" >&2
+  echo "Dump:     $dump_file" >&2
+  read -r -p "Type 'yes' to replace the current public schema: " confirmation < /dev/tty || {
+    echo "Import cancelled; no schema changes were made." >&2
+    exit 3
+  }
+  if [[ "$confirmation" != "yes" ]]; then
+    echo "Import cancelled; no schema changes were made." >&2
+    exit 3
+  fi
+
+  create_public_schema=$(psql -X -At -v ON_ERROR_STOP=1 -v app_user="$app_user" -d "$app_db" <<'SQL'
+SELECT format('CREATE SCHEMA public AUTHORIZATION %I;', :'app_user');
+SQL
+)
+
+  {
+    printf '%s\n' 'DROP SCHEMA IF EXISTS public CASCADE;'
+    printf '%s\n' "$create_public_schema"
+    cat "$dump_file"
+  } | psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db"
+else
+  psql -X -v ON_ERROR_STOP=1 --single-transaction -d "$app_db" -f "$dump_file"
+fi
 psql -X -v ON_ERROR_STOP=1 -v app_user="$app_user" -d "$app_db" <<'SQL'
 SELECT format('GRANT USAGE ON SCHEMA public TO %I', :'app_user') \gexec
 SELECT format('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO %I', :'app_user') \gexec
