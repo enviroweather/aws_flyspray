@@ -16,21 +16,24 @@ check tests Apache, not database or application health.
 
 ## DNS and lifecycle
 
-Lightsail static IPs attach to instances, not container services. The existing
-IP is retained in Terraform, but cannot direct traffic to the container. A
-one-time GoDaddy change from the old A record to a CNAME is necessary, in
-addition to a certificate-validation CNAME. The service's generated hostname
-stays the same across image deployments and capacity changes **while that
-service exists**. Deleting and recreating the service gives it a new hostname,
-requiring another DNS change. Ordinary retries should redeploy an image, not
-destroy the service.
+Lightsail container services do not support static IPs at all — only Lightsail
+instances (VMs) can attach one, and this project no longer uses instances.
+Traffic reaches the app only through the service's own generated hostname (a
+CNAME target), never an IP address. A one-time GoDaddy change from an A record
+to a CNAME is necessary, in addition to a certificate-validation CNAME. The
+service's generated hostname stays the same across image deployments and
+capacity changes **while that service exists**. Deleting and recreating the
+service gives it a new hostname, requiring another DNS change. Ordinary
+retries should redeploy an image, not destroy the service.
 
-The service, database, and legacy static IP have `prevent_destroy` guards.
-Consequently `terraform destroy` will fail while these resources remain in the
-configuration. The service is billable even when disabled or without a
-deployment; the retained unattached static IP may also incur charges. Check
-current prices with `aws lightsail get-container-service-powers --region REGION`
-and the Lightsail pricing page.
+The service, database, and a legacy, unattached static IP (kept only so it
+isn't accidentally released — it has no effect on container traffic) have
+`prevent_destroy` guards. Consequently `terraform destroy` will fail while
+these resources remain in the configuration. The service is billable even when
+disabled or without a deployment; the retained unattached static IP may also
+incur charges. Check current prices with
+`aws lightsail get-container-service-powers --region REGION` and the Lightsail
+pricing page.
 
 ## Security
 
@@ -84,23 +87,27 @@ are in the same Lightsail account and region, and verify connectivity.
   the image removes the public setup directory and does not run schema
   upgrades.
 
-## Migration
+## Initial setup
 
-Run Terraform commands from `terraform/`. Do not run a normal full apply until
-the container has been verified and you are ready to remove the old VM. These
-steps intentionally use targeted plans during the transition; targeting is an
-exception, so inspect each plan and run a full plan at the end.
+Run Terraform commands from `terraform/`. These steps provision the service,
+certificate, database, and CodeBuild project from scratch, for example when
+standing up a new environment. An already-deployed environment only needs the
+[container rebuild and redeploy](#rebuilding-and-redeploying-just-the-container)
+steps below for an ordinary code change. These steps intentionally use
+targeted plans at first; targeting is an exception, so inspect each plan and
+run a full plan at the end.
 
 1. Back up the database, the existing Flyspray configuration, attachments,
    avatars, and Terraform state to a protected location. Verify the backups can
-   be restored. Record the current A record, static IP, region, account, and
-   VM details. Avoid concurrent state operations. Do not import a dump into an
-   existing database merely to move compute: the container can use the current
-   private database and application user.
+   be restored. Record the current A record, static IP, region, and account
+   details. Avoid concurrent state operations. Do not import a dump into an
+   existing database merely to stand up the container: it can use an existing
+   private database and application user instead of a fresh import.
 
 2. Review the existing `terraform.tfvars`, especially region, `instance_name`,
-   database settings, app user, and hostname. Keep the existing instance name
-   so the legacy IP name does not change. For a new environment start from
+   database settings, app user, and hostname. `instance_name` only names the
+   retained legacy static IP resource; leave it unchanged so that resource's
+   name stays stable. For a new environment start from
    [terraform/terraform.tfvars.example.txt](terraform/terraform.tfvars.example.txt).
    Leave `deploy_flyspray` at its default `false` and `enable_custom_domain`
    false for the initial stage. Copy [example.env.txt](example.env.txt) to the
@@ -126,7 +133,7 @@ exception, so inspect each plan and run a full plan at the end.
    ```
 
    To get a stable-ish version number, put a value TF_VAR_build_ver="X" in .env 
-   At the shell, generate at timestamp with $(date -u '+%Y-%m-%dT%H:%M:%SZ') 
+   At the shell, generate at timestamp with `TZ=UTC; date -u '+%Y-%m-%dT%H:%M:%SZ'; unset $TZ`
    then copy and paste into the .env file 
 
    You can also supply either tag value directly for one command. Use the same
@@ -187,17 +194,17 @@ exception, so inspect each plan and run a full plan at the end.
    plan after any future CodeBuild push automatically picks up the new image
    — no image tag or reference needs to be copied by hand. The deployment's
    `DB_PREFIX` defaults to `flyspray_`; override it in tfvars if the existing
-   database uses a different prefix. The target keeps the old VM in place;
-   review the plan for database replacement or other changes.
+   database uses a different prefix. Review the plan for database replacement
+   or other unexpected changes.
 
    ensure the cookie salt need by the flyspray app is also set. It's a good idea
    to put this into .env file so you could `source ../.env` first to ensure that it is. 
 
    ```bash
-   export TF_VAR_deploy_flyspray=true
-   export TF_VAR_enable_custom_domain=true
    terraform plan -target=aws_lightsail_container_service_deployment_version.flyspray \
+     -var="deploy_flyspray=true" -var="enable_custom_domain=true" \
      -out=deployment.tfplan
+
    terraform show deployment.tfplan
    terraform apply deployment.tfplan
    ```
@@ -226,10 +233,10 @@ exception, so inspect each plan and run a full plan at the end.
    limitations on files and sessions. The default service URL is useful for
    the static `/health.txt` check; the application forces the custom hostname.
 
-8. Only after verifying the cutover and backups, run an untargeted plan. It
-   should propose removing the old VM, attachment, firewall, snapshot helper,
-   and generated VM files. It must not replace or destroy the database, static
-   IP, or service. Review and approve the saved plan before applying:
+8. After verifying the deployment and backups, run an untargeted plan to
+   confirm Terraform proposes no unexpected changes. It must not replace or
+   destroy the database, static IP, or service. Review and approve the saved
+   plan before applying:
 
    ```bash
    terraform plan -out=cutover.tfplan
@@ -238,18 +245,99 @@ exception, so inspect each plan and run a full plan at the end.
    ```
 
    Delete old sensitive plan files securely according to your organization's
-   process. Do not run the old `output/setup_ssl.sh`; Lightsail handles TLS.
+   process. `terraform/output/setup_ssl.sh` is a leftover script from the
+   project's previous VM-based setup; do not run it — Lightsail handles TLS
+   for container services automatically.
+
+## Rebuilding and redeploying just the container
+
+Use this for an ordinary code change under `container/` (for example, an edit
+to [container/configure.php](container/configure.php)) on an
+already-deployed environment. It rebuilds and redeploys the image only. It
+does not touch the database, the certificate, or `app_hostname`, so **no
+GoDaddy DNS change and no new certificate are needed**, as long as you keep
+using the same `image_tag` (default `latest`) and don't destroy/recreate the
+container service.
+
+Run from `terraform/` with `.env` already sourced so `TF_VAR_cookie_salt` and
+the other secrets are set:
+
+```bash
+set -a
+source ../.env
+set +a
+```
+
+1. **Refresh the build source.** Terraform zips the `container/` folder and
+   uploads it to the S3 location CodeBuild reads from; re-apply so CodeBuild
+   picks up your latest edits before the next build. This only refreshes the
+   build source/config — it does not deploy anything to Lightsail or restart
+   the running container.
+
+   ```bash
+   terraform plan -target=aws_s3_object.container_source \
+     -target=aws_codebuild_project.flyspray -out=rebuild.tfplan
+   terraform show rebuild.tfplan
+   terraform apply rebuild.tfplan
+   ```
+
+2. **Build and push the new image.** This builds on CodeBuild's x86_64 host
+   and pushes the new digest to the existing `image_tag` (default `latest`)
+   in ECR.
+
+   ```bash
+   bash scripts/start_build.sh
+   ```
+
+3. **Deploy the new digest to the running service.** A successful build alone
+   does not update the running container — Lightsail only redeploys when you
+   apply a new deployment version. Terraform resolves `image_tag` to its
+   current digest via a data source, so this plan always picks up the image
+   just pushed in step 2; review it to confirm only the deployment version
+   changes.
+
+   ```bash
+   export TF_VAR_deploy_flyspray=true
+   terraform plan -target=aws_lightsail_container_service_deployment_version.flyspray \
+     -out=deployment.tfplan
+   terraform show deployment.tfplan
+   terraform apply deployment.tfplan
+   ```
+
+4. Confirm the new deployment is active, then verify the app at its existing
+   hostname:
+
+   ```bash
+   aws lightsail get-container-service-deployments --region "$(terraform output -raw region)" \
+     --service-name "$(terraform output -raw container_service_name)" \
+     --query 'deployments[].{version:version,state:state}'
+   curl -I https://<app_hostname>/health.txt
+   ```
+
+None of steps 1–4 touch `aws_lightsail_database.flyspray`,
+`aws_lightsail_container_service.flyspray`, or `aws_lightsail_certificate.flyspray`,
+so the database, hostname, and certificate are unaffected — there is nothing
+to change at GoDaddy and no certificate to reissue.
+
+**When this is not possible:** only destroying/recreating
+`aws_lightsail_container_service.flyspray` itself (for example, a manual
+`terraform destroy` or `-replace` of the service, or changing
+`container_service_name`) gives it a new generated hostname. Rebuilding and
+redeploying an image through steps 1–4 above never causes this. If it ever
+does happen, repeat the certificate and DNS steps from
+[Initial setup](#initial-setup): wait for the new certificate to validate,
+update the GoDaddy CNAME to the new hostname, and re-verify.
 
 ## Rollback and recovery
 
-Before removing the VM, rollback means restoring the original GoDaddy A record
-to the retained static IP and leaving the old instance attached. DNS propagation
-can delay rollback. After the VM is removed, an IP alone cannot serve traffic:
-restore an instance from a verified snapshot or backup and attach the IP, then
-restore DNS. A rollback of a container image can re-tag a previously pushed ECR
-image as `image_tag` (or add a dedicated `image_tag` variable value pinned to
-an older digest) and apply a reviewed Terraform plan. Protect database and
-file backups independently of the VM and container service.
+To roll back a bad container deployment, pin `image_tag` to a previously
+pushed, known-good tag (or add a dedicated variable value pinned to an older
+image digest) and apply a reviewed Terraform plan targeting
+`aws_lightsail_container_service_deployment_version.flyspray`. Lightsail also
+keeps a history of previous deployment versions in the console/CLI if you need
+to confirm an earlier digest. This does not change the database, hostname, or
+certificate. Protect database and file backups independently of the container
+service.
 
 To intentionally remove protected resources, first take and verify backups,
 review current state and billing, explicitly remove the relevant lifecycle
@@ -281,7 +369,7 @@ bucket versioning. Restrict access to the bucket and its backups.
 
 ## Files
 
-- [terraform/main.tf](terraform/main.tf): retained IP and managed database.
+- [terraform/main.tf](terraform/main.tf): 
 - [terraform/container.tf](terraform/container.tf): service, certificate, and deployment.
 - [terraform/build.tf](terraform/build.tf): ECR repository, S3 build source, and CodeBuild project.
 - [terraform/scripts/start_build.sh](terraform/scripts/start_build.sh): triggers and waits on a CodeBuild run.
