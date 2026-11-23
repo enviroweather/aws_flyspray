@@ -33,7 +33,7 @@ services:
       DB_PASS: dev-only-password
       DB_PREFIX: flyspray_
       APP_BASE_URL: http://localhost:8080/
-      COOKIE_SALT: dev-only-cookie
+      COOKIE_SALT: "dev-only-cookie-salt-123"
       SYNTAX_PLUGIN: ""
 
     ports:
