@@ -23,11 +23,6 @@ output "codebuild_project_name" {
   value       = aws_codebuild_project.flyspray.name
 }
 
-output "static_ip" {
-  description = "Retained legacy instance IP; container services cannot use it."
-  value       = aws_lightsail_static_ip.flyspray.ip_address
-}
-
 output "db_instance_name" {
   description = "Lightsail managed database instance name."
   value       = aws_lightsail_database.flyspray.relational_database_name

@@ -36,16 +36,7 @@ locals {
     environment = var.environment
   }
 
-  az             = "${var.region}a"
-  static_ip_name = "${var.instance_name}-static-ip"
-}
-
-resource "aws_lightsail_static_ip" "flyspray" {
-  name = local.static_ip_name
-
-  lifecycle {
-    prevent_destroy = true
-  }
+  az = "${var.region}a"
 }
 
 resource "aws_lightsail_database" "flyspray" {

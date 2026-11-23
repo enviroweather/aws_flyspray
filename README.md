@@ -17,21 +17,19 @@ check tests Apache, not database or application health.
 ## DNS and lifecycle
 
 Lightsail container services do not support static IPs at all — only Lightsail
-instances (VMs) can attach one, and this project no longer uses instances.
-Traffic reaches the app only through the service's own generated hostname (a
-CNAME target), never an IP address. A one-time GoDaddy change from an A record
-to a CNAME is necessary, in addition to a certificate-validation CNAME. The
-service's generated hostname stays the same across image deployments and
-capacity changes **while that service exists**. Deleting and recreating the
-service gives it a new hostname, requiring another DNS change. Ordinary
-retries should redeploy an image, not destroy the service.
+instances (VMs) can attach one, and this project no longer uses instances or a
+static IP. Traffic reaches the app only through the service's own generated
+hostname (a CNAME target), never an IP address. A one-time GoDaddy change from
+an A record to a CNAME is necessary, in addition to a certificate-validation
+CNAME. The service's generated hostname stays the same across image
+deployments and capacity changes **while that service exists**. Deleting and
+recreating the service gives it a new hostname, requiring another DNS change.
+Ordinary retries should redeploy an image, not destroy the service.
 
-The service, database, and a legacy, unattached static IP (kept only so it
-isn't accidentally released — it has no effect on container traffic) have
-`prevent_destroy` guards. Consequently `terraform destroy` will fail while
-these resources remain in the configuration. The service is billable even when
-disabled or without a deployment; the retained unattached static IP may also
-incur charges. Check current prices with
+The service and database have `prevent_destroy` guards. Consequently
+`terraform destroy` will fail while these resources remain in the
+configuration. The service is billable even when disabled or without a
+deployment. Check current prices with
 `aws lightsail get-container-service-powers --region REGION` and the Lightsail
 pricing page.
 
@@ -99,15 +97,13 @@ run a full plan at the end.
 
 1. Back up the database, the existing Flyspray configuration, attachments,
    avatars, and Terraform state to a protected location. Verify the backups can
-   be restored. Record the current A record, static IP, region, and account
-   details. Avoid concurrent state operations. Do not import a dump into an
+   be restored. Record the current A record, region, and account details.
+   Avoid concurrent state operations. Do not import a dump into an
    existing database merely to stand up the container: it can use an existing
    private database and application user instead of a fresh import.
 
-2. Review the existing `terraform.tfvars`, especially region, `instance_name`,
-   database settings, app user, and hostname. `instance_name` only names the
-   retained legacy static IP resource; leave it unchanged so that resource's
-   name stays stable. For a new environment start from
+2. Review the existing `terraform.tfvars`, especially region, database
+   settings, app user, and hostname. For a new environment start from
    [terraform/terraform.tfvars.example.txt](terraform/terraform.tfvars.example.txt).
    Leave `deploy_flyspray` at its default `false` and `enable_custom_domain`
    false for the initial stage. Copy [example.env.txt](example.env.txt) to the
@@ -235,7 +231,7 @@ run a full plan at the end.
 
 8. After verifying the deployment and backups, run an untargeted plan to
    confirm Terraform proposes no unexpected changes. It must not replace or
-   destroy the database, static IP, or service. Review and approve the saved
+   destroy the database or service. Review and approve the saved
    plan before applying:
 
    ```bash
@@ -343,9 +339,9 @@ To intentionally remove protected resources, first take and verify backups,
 review current state and billing, explicitly remove the relevant lifecycle
 guard in configuration, then run `terraform plan -destroy` and inspect every
 resource before approving `terraform destroy`. Destroying the service changes
-the hostname on recreation; destroying the IP releases it. The database is
-configured to skip a final snapshot, so create and verify one separately before
-any intentional database deletion.
+the hostname on recreation. The database is configured to skip a final
+snapshot, so create and verify one separately before any intentional database
+deletion.
 
 ## Database import
 
@@ -369,7 +365,7 @@ bucket versioning. Restrict access to the bucket and its backups.
 
 ## Files
 
-- [terraform/main.tf](terraform/main.tf): 
+- [terraform/main.tf](terraform/main.tf): managed database.
 - [terraform/container.tf](terraform/container.tf): service, certificate, and deployment.
 - [terraform/build.tf](terraform/build.tf): ECR repository, S3 build source, and CodeBuild project.
 - [terraform/scripts/start_build.sh](terraform/scripts/start_build.sh): triggers and waits on a CodeBuild run.

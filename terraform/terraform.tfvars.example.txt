@@ -6,8 +6,6 @@ container_service_name = "flyspray-containers"
 container_power        = "nano"
 container_scale        = 1
 
-# Keep the existing instance name to retain its static IP resource identity.
-instance_name     = "flyspray-app"
 db_instance_name  = "flyspray-db"
 db_bundle         = "micro_2_0"
 db_backup_window  = "03:00-03:30"

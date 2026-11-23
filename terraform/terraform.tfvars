@@ -27,9 +27,6 @@ environment = "prod"
 # Resource discovery, billing, and cleanup tags. Keep build_ver stable for this stack.
 project = "flyspray"
 
-# --- Legacy static IP name (kept stable; do not change) ---
-instance_name = "flyspray-app"
-
 # --- Hostname (required — no default) ---
 app_hostname = "flyspray.enviroweather.net"
 
@@ -58,6 +55,5 @@ s3_dump_key = "flyspray_22_10_2026.sql"
 #   terraform apply -var-file=terraform.dev.tfvars
 # =============================================================================
 # environment      = "dev"
-# instance_name    = "flyspray-dev"
 # db_instance_name = "flyspray-dev-db"
 # app_hostname     = "flyspray-dev.enviroweather.net"

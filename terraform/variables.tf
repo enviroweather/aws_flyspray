@@ -17,12 +17,6 @@ variable "environment" {
   default     = "prod"
 }
 
-variable "instance_name" {
-  description = "Legacy name kept only to preserve the protected static IP's resource name."
-  type        = string
-  default     = "flyspray-app"
-}
-
 variable "flyspray_version" {
   description = "Flyspray release tag that CodeBuild downloads and bakes into the image."
   type        = string
