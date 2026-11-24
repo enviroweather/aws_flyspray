@@ -294,7 +294,10 @@ set +a
 
    ```bash
    export TF_VAR_deploy_flyspray=true
+   export TF_VAR_enable_custom_domain=true
+
    terraform plan -target=aws_lightsail_container_service_deployment_version.flyspray \
+      -var="deploy_flyspray=true" -var="enable_custom_domain=true" \
      -out=deployment.tfplan
    terraform show deployment.tfplan
    terraform apply deployment.tfplan
