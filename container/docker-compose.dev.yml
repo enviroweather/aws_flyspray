@@ -23,9 +23,9 @@ services:
     build:
       context: .
       args:
-        INCLUDE_SETUP: "true"
+        INCLUDE_SETUP: "false"
     environment:
-      INCLUDE_SETUP: true 
+      INCLUDE_SETUP: false 
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: flyspray

@@ -3,12 +3,11 @@ FROM php:8.2-apache
 ARG FLYSPRAY_VERSION=1.0-rc11
 # Local dev/test only (see container/README.md); CodeBuild never sets this.
 ARG INCLUDE_SETUP=false
+COPY flyspray-${FLYSPRAY_VERSION}/ /var/www/html/
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl libpq-dev libpng-dev libjpeg62-turbo-dev libzip-dev libexif12 \ 
     && docker-php-ext-configure gd --with-jpeg \
     && docker-php-ext-install pgsql pdo_pgsql gd zip exif \
-    && curl -fsSL "https://github.com/flyspray/flyspray/releases/download/v${FLYSPRAY_VERSION}/flyspray-${FLYSPRAY_VERSION}.tgz" \
-      | tar -xz --strip-components=1 -C /var/www/html \
     && test -f /var/www/html/vendor/autoload.php \
     && if [ "$INCLUDE_SETUP" != "true" ]; then rm -rf /var/www/html/setup; fi \
     && rm -rf /var/lib/apt/lists/* \

@@ -1,0 +1,191 @@
+body {
+  margin:0; padding:0;
+  font-family: Verdana, sans-serif;
+  font-size:13px;
+}
+a { text-decoration: none; }
+input:required {border: 1px solid #f90;}
+
+#header {
+  /*background-color:#47617B;*/
+  background-color:#5e5e5e; /* matching grayscale brightness of title.png */
+  margin:0;
+  padding:0;
+  border-bottom:4px solid #5f9729;
+}
+#logo {
+  background-image:url(../images/title.png);
+  background-position: 10px 10px;
+  background-repeat: no-repeat;
+  background-attachment:scroll;
+  
+  -webkit-filter: grayscale(100%);
+  -moz-filter: grayscale(100%);
+  -o-filter: grayscale(100%);
+  filter: gray; /* IE6-9 */
+  filter: grayscale(100%); /* grayscale until a transparent logo exists that match colors of default theme */
+}
+#logo h1 {
+  padding:0;
+  margin:0;
+  font-size:2em;
+  line-height: 90px;
+  font-weight:normal;
+}
+#logo h1 a {
+  display: block;
+  height: 90px;
+  color:#fff;
+  border: 0;
+  padding: 0;
+  margin: 0 auto;
+  padding-left:260px;
+}
+#content {max-width:800px;margin-left:auto;margin-right:auto;}
+
+#footer {
+  background-color: #333;
+  padding: 1em;
+  margin:0;
+  border-top: 2px solid #5f9729;
+  text-align: center;
+  color:#ccc;
+}
+#footer p, #footer ul{display:inline-block;}
+#footer li {display:inline-block; list-style:none;}
+#footer a{ display:inline-block; padding:0.5em; color:#fff; }
+#footer a:hover {background-color:#000;}
+
+#stepbar{ margin-top:1em;}
+#stepbar div {
+  box-sizing:border-box;
+  height:36px;
+  font-weight: bold;
+  padding: 10px;
+  background-color:#ddd;
+  margin-right:10px;
+  margin-bottom:6px; /* when it wraps on small displays */
+  display:inline-block;
+  position:relative; /* for the :after rightarrow */
+}
+
+#stepbar .step-on { background-color:#5f9729; color:#fff;}
+#stepbar .done { background-color:#333; color:#ccc;}
+
+/* css arrow to right */
+#stepbar div:after{
+  position:absolute;
+  content:"";
+  width:0;
+  height:0;
+  top:0;
+  
+  border-top:18px solid transparent;
+  border-bottom:18px solid transparent;
+  border-left:8px solid #ddd;
+  right:-8px;
+}
+
+#stepbar div::before {
+  position: absolute;
+  content: "";
+  height: 0;
+  width: 0;
+  top: 0;
+  
+  border-bottom: 18px solid #ddd;
+  border-top: 18px solid #ddd;
+  border-left: 8px solid transparent;
+  left:-8px;
+}
+#stepbar .step-on::after{border-left-color:#5f9729;}
+#stepbar .step-on::before{border-top-color:#5f9729;border-bottom-color:#5f9729;}
+#stepbar .done::after{border-left-color:#333;}
+#stepbar .done::before{border-top-color:#333;border-bottom-color:#333;}
+#stepbar div:first-child::before{display:none;}
+
+.install {
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: .5em;
+  padding: 10px;
+  border: 1px solid #ddd;
+  max-width: 700px;
+  background-color: #f1f1f1;
+}
+
+.formBlock {
+  border: 1px solid #ddd;
+  padding:5px;
+  margin:5px;
+  background: #f1f1f1;
+  color:#000;
+}
+
+.formBlock td {
+  vertical-align:top;
+  padding-top:1.5em;
+  min-width:150px;
+}
+
+.button, button, input[type="submit"] {
+	font-size: 2em;
+	display: inline-block;
+	margin: 0.5em auto;
+	padding: 0.2em 1em;
+	border: 1px solid #bbb;
+	border-radius: 4px;
+	box-shadow: 0px 1px 1px #ddd;
+	font-family: "Lucida Grande", Tahoma, Arial, Verdana, sans-serif;
+	text-decoration: none;
+	font-weight: bold;
+	color: #565656;
+	cursor: pointer;
+	text-align:center;
+}
+
+body a.button.positive, body button.positive {
+	color: #fff;
+	background-color: #5f9729;
+}
+
+.error {
+  color : #c00;
+  font-weight : bold;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.red {
+  color:#F00;
+}
+.orange {
+  color:#FFA500;
+}
+.green {
+  color:#078843;
+}
+
+.install h1 {
+  color:#47617B;
+  text-align:center;
+}
+.install h2 {
+  color:#688EB4;
+}
+
+h1.error {
+  background-image: url(../images/exclamation.png);
+  border:none;
+  text-indent: 45px;
+  background-position: 0px 0px;
+  background-repeat: no-repeat;
+  text-align:left;
+}
+
+.box {
+  border: 5px solid #688EB4;
+  padding:0;
+  margin:0;
+  background-color: #F1F3F5;
+}

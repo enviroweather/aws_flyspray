@@ -1,0 +1,60 @@
+{
+    "name": "flyspray/flyspray",
+    "type": "application",
+    "description": "The Flyspray bug tracking system.",
+    "keywords": ["bug","bugs","tracker","issue","issues", "web"],
+    "homepage": "https://www.flyspray.org",
+    "support": {
+        "issues": "https://bugs.flyspray.org",
+        "source": "https://github.com/flyspray/flyspray"
+    },
+    "license": "LGPL-2.1",
+    "authors": [
+        {
+            "name": "Peter Liscovius",
+            "role": "Current maintainer"
+        },
+        {
+            "name": "former developers",
+            "homepage": "https://github.com/flyspray/flyspray/graphs/contributors"
+        },
+        {
+            "name": "contributors",
+            "homepage": "https://github.com/flyspray/flyspray/graphs/contributors"
+        }
+    ],
+    "require": {
+        "php" : "^5.5.9 || ^7.0 || ^8.0",
+        "swiftmailer/swiftmailer": "~5.0",
+        "adodb/adodb-php": "5.21.4",
+        "jamiebicknell/sparkline": "1.*",
+        "ezyang/htmlpurifier": "~4.12",
+        "dapphp/securimage": "3.6.8",
+        "league/oauth2-client": "~0.12" 
+    },
+    "require-dev": {
+        "phpunit/phpunit": "*"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/jamiebicknell/Sparkline"
+        }
+    ],
+    "scripts": {
+        "post-update-cmd": [
+            "rm -rf vendor/dapphp/securimage/captcha.html vendor/dapphp/securimage/example_form.php vendor/dapphp/securimage/example_form.ajax.php vendor/dapphp/securimage/securimage_play.swf vendor/dapphp/securimage/examples/",
+            "rm -rf vendor/dapphp/securimage/audio/*",
+            "rm -rf vendor/dapphp/securimage/backgrounds/*",
+            "cp setup/upgrade/1.0/datadict-postgres.inc.php vendor/adodb/adodb-php/datadict/datadict-postgres.inc.php",
+            "echo '<?php return array(\"session_name\"=>\"flyspray\"); ?>' > vendor/dapphp/securimage/config.inc.php"
+        ]
+    },
+    "autoload": {
+        "classmap": ["includes"],
+        "files": ["includes/utf8.inc.php"],
+        "psr-4": {
+            "Flyspray\\": "src/"
+        }
+    }
+}
